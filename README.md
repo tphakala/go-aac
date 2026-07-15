@@ -6,8 +6,8 @@
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/License-LGPL--2.1--or--later-blue.svg)](LICENSE)
 [![Sponsor](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/tphakala)
 
-Pure-Go AAC-LC encoder, ported from FFmpeg's native AAC encoder. No cgo and no
-external libraries in the published module.
+Pure-Go AAC-LC encoder and decoder, ported from FFmpeg's native AAC encoder and
+fixed-point decoder. No cgo and no external libraries in the published module.
 
 ## Status
 
@@ -41,8 +41,9 @@ multichannel beyond stereo, VBR (`global_quality`), MP4 muxing.
 
 ## Approach
 
-go-aac is a faithful port of FFmpeg's AAC encoder at a pinned commit
-(`d09d5afc3a`), kept honest by differential testing against the real C.
+go-aac is a faithful port of FFmpeg's AAC encoder and fixed-point decoder at a
+pinned commit (`d09d5afc3a`), kept honest by differential testing against the
+real C.
 
 For each subsystem, a C harness links the pinned FFmpeg libraries, runs the
 **actual FFmpeg function** on identical input, and dumps its internals; the Go
@@ -56,17 +57,17 @@ port must then reproduce them. That is a far sharper instrument than PSNR:
 | `tools/cpsy` | the 3GPP psychoacoustic model | window decisions identical, bit reservoir exact |
 | `tools/cnmr` | the NMR Viterbi trellis and rate control | bit-exact, tie-breaking included |
 | `tools/ctns`, `tools/ctwoloop` | TNS and the twoloop coder | bit-exact |
+| decoder gates | LC symbol decode, int32 IMDCT, full reconstruction, s16 PCM | 1,999,224 symbols + 12,969,984 reconstructed values byte-identical; s16 PCM identical to `ffmpeg -c:a aac_fixed` |
 
 PSNR cannot tell you that a psychoacoustic constant was misported, that a bit
 reservoir is drifting, or that a Viterbi path was suboptimal. These harnesses
 can, and they caught real bugs that would otherwise have shipped silently.
 
-While the port is in progress the internal packages are deliberately written in
-a C-shaped style, so they stay diffable against upstream FFmpeg and every
-ported function carries a provenance comment naming its C origin. That
-constraint is temporary: once porting is complete and the differential gates
-are green, the internals get rewritten in idiomatic Go alongside the
-optimization work. The public API is idiomatic Go today.
+The internal packages are deliberately written in a C-shaped style, so they
+stay diffable against upstream FFmpeg, and every ported function carries a
+provenance comment naming its C origin. That constraint is temporary: with the
+AAC-LC port complete and the differential gates green, the idiomatic-Go rewrite
+happens alongside the optimization work. The public API is idiomatic Go today.
 
 ## Install
 
@@ -158,8 +159,9 @@ Single-threaded, Apple M-series, 48 kHz, 128 kbps:
 | fast | mono | 206x |
 
 Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
-and stereo. SIMD kernels are future work; the scalar port is the canonical
-reference.
+and stereo. Decoding is far cheaper, roughly 3000x real time for mono and 1500x
+for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
+SIMD kernels are future work; the scalar port is the canonical reference.
 
 ## License
 
