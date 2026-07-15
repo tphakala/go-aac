@@ -54,6 +54,17 @@ func (d *Decoder) DecodeFrame(pkt []byte) error {
 // ErrUnsupported.
 func (d *Decoder) decodeFrameGA(r *bits.Reader) error {
 	d.Elems = d.Elems[:0]
+	// Clear stale presence left by any earlier frame. Stage 3 of reconstruct
+	// walks the che grid by present, so a frame that errored after publishing
+	// an element (or a caller that skipped reconstruct) must not leave that
+	// element marked present for a later frame to process on stale spectra.
+	for t := range d.che {
+		for _, che := range d.che[t] {
+			if che != nil {
+				che.present = false
+			}
+		}
+	}
 	var chePresence [4][maxElemID]uint8
 	for {
 		elemType := int(r.Read(3))
@@ -71,10 +82,18 @@ func (d *Decoder) decodeFrameGA(r *bits.Reader) error {
 		// falls through to the ErrUnsupported branch in the switch below.
 		// Otherwise the unallocated-che check would mask it as ErrInvalidData.
 		if elemType < TypeDSE && elemType != TypeCCE {
-			// The C tolerates ONE duplicate channel element per frame
-			// (logged at debug level) and errors on the second
-			// (decode_frame_ga @ d09d5afc3a: che_presence > 1 check).
-			if chePresence[elemType][elemID] > 1 {
+			// A channel element ID never repeats within a valid AAC-LC
+			// frame. The C tolerates one duplicate as error resilience and
+			// re-decodes it into the same che in place (decode_frame_ga
+			// @ d09d5afc3a: che_presence > 1). D2 defers dequant out of the
+			// parse loop, so by reconstruction time the first occurrence's
+			// symbols are already overwritten by the second, and the shared
+			// PNS random_state would advance differently than the C's inline
+			// per-occurrence dequant. Rather than emit best-effort output that
+			// cannot match the oracle on such a malformed stream, reject the
+			// duplicate. No valid stream and no gated corpus stream repeats an
+			// element ID.
+			if chePresence[elemType][elemID] > 0 {
 				return fmt.Errorf("%w: duplicate channel element %d.%d",
 					ErrInvalidData, elemType, elemID)
 			}
@@ -91,11 +110,13 @@ func (d *Decoder) decodeFrameGA(r *bits.Reader) error {
 		case TypeSCE, TypeLFE:
 			err = d.decodeICS(r, &che.Ch[0], false)
 			if err == nil {
+				che.present = true
 				d.Elems = append(d.Elems, ElemRef{Type: elemType, ID: elemID, CPE: che})
 			}
 		case TypeCPE:
 			err = d.decodeCPE(r, che)
 			if err == nil {
+				che.present = true
 				d.Elems = append(d.Elems, ElemRef{Type: elemType, ID: elemID, CPE: che})
 			}
 		case TypeCCE:
@@ -178,6 +199,8 @@ func (d *Decoder) decodeICS(r *bits.Reader, sce *SCE, commonWindow bool) error {
 // M/S and intensity APPLICATION are later phases; the mask parse is here).
 func (d *Decoder) decodeCPE(r *bits.Reader, cpe *CPE) error {
 	commonWindow := r.ReadBit() != 0
+	cpe.commonWindow = commonWindow
+	cpe.msPresent = 0
 	if commonWindow {
 		if err := d.decodeICSInfo(r, &cpe.Ch[0].ICS); err != nil {
 			return err
@@ -189,6 +212,7 @@ func (d *Decoder) decodeCPE(r *bits.Reader, cpe *CPE) error {
 		if msPresent == 3 {
 			return fmt.Errorf("%w: ms_present = 3 is reserved", ErrInvalidData)
 		}
+		cpe.msPresent = msPresent
 		if msPresent > 0 {
 			decodeMidSideStereo(r, cpe, msPresent)
 		}
@@ -205,6 +229,7 @@ func (d *Decoder) decodeCPE(r *bits.Reader, cpe *CPE) error {
 // ms_present == 0 (the caller never applies them).
 func decodeMidSideStereo(r *bits.Reader, cpe *CPE, msPresent int) {
 	maxIdx := cpe.Ch[0].ICS.NumWindowGroups * cpe.Ch[0].ICS.MaxSFB
+	cpe.MaxSFBSte = cpe.Ch[0].ICS.MaxSFB
 	if msPresent == 1 {
 		for idx := range maxIdx {
 			cpe.MSMask[idx] = uint8(r.ReadBit())

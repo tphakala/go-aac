@@ -22,6 +22,10 @@ tools/cdump/*.f32
 tools/cdump/*.f64
 tools/gentables/gentables
 
+# Decoder reconstruction oracle harness (Phase D2): binary only; the cdec2.c
+# source is committed and the fixtures live under internal/dec/testdata/.
+tools/cdec2/cdec2
+
 # Editor and OS noise
 .DS_Store
 *.swp

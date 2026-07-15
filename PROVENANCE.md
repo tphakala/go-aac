@@ -43,6 +43,23 @@ this commit:
 - libavutil/tx_priv.h, tx_template.c (int32 inverse MDCT, RESCALE/CMUL)
 - libavutil/fixed_dsp.c (`vector_fmul_window`)
 
+The D2 fixed-point reconstruction core (dequantization, PNS, stereo tools, TNS
+and the S32P clip) additionally draws from:
+
+- libavcodec/aac/aacdec_fixed_dequant.h (`vector_pow43`, `subband_scale`,
+  `noise_scale`, `exp2tab`, the `fixed_sqrt` composition)
+- libavcodec/aac/aacdec_proc_template.c (the PNS noise fill in
+  `decode_spectrum_and_dequant`, `lcg_random`)
+- libavcodec/aac/aacdec_dsp_template.c (`apply_mid_side_stereo`,
+  `apply_intensity_stereo`, `apply_tns`, `clip_output`)
+- libavutil/fixed_dsp.c, fixed_dsp.h (`scalarproduct_fixed`,
+  `butterflies_fixed`, `fixed_sqrt`)
+- libavcodec/lpc_functions.h (the fixed `compute_lpc_coefs` for TNS)
+- libavcodec/cbrt_tablegen.h, cbrt_tablegen_common.c, cbrt_data.h (the computed
+  cbrt fixed dequant table `ff_cbrt_tab_fixed`)
+- libavcodec/mathops.h (`ff_sqrt`, the integer floor-sqrt reference for
+  `fixed_sqrt`)
+
 The baked integer sine window table (`internal/window/sinefixed_tables.go`) is
 dumped from the pinned build rather than computed. FFmpeg generates it at
 runtime with `sinf()` (`sinewin_fixed_tablegen.h`), which is not correctly

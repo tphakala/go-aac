@@ -31,3 +31,33 @@ func VectorFmulWindow(dst, src0, src1, win []int32, n int) {
 		dst[n+j] = int32((int64(s0)*int64(wi) + int64(s1)*int64(wj) + 0x40000000) >> 31)
 	}
 }
+
+// ScalarproductFixed mirrors scalarproduct_fixed_c (libavutil/fixed_dsp.c:
+// 126-137 @ d09d5afc3a): a 64-bit accumulator seeded with 0x40000000 so the
+// final arithmetic >>31 rounds to nearest. The decoder uses it on the PNS
+// noise fill to measure a band's energy.
+func ScalarproductFixed(v1, v2 []int32) int32 {
+	p := int64(0x40000000)
+	// v2 bounds the loop; re-slice v1 to the same length so the loop body
+	// carries no bounds check (encoder-phase BCE discipline).
+	v1 = v1[:len(v2)]
+	for i, b := range v2 {
+		p += int64(v1[i]) * int64(b)
+	}
+	return int32(p >> 31)
+}
+
+// ButterfliesFixed mirrors butterflies_fixed_c (libavutil/fixed_dsp.c:139-149
+// @ d09d5afc3a): v1[i], v2[i] = v1[i]+v2[i], v1[i]-v2[i]. The C casts v1
+// through unsigned to make the add/sub wraparound defined; Go int32 arithmetic
+// wraps identically, so no cast is needed. Applied to the dequantized spectra
+// for mid/side stereo.
+func ButterfliesFixed(v1, v2 []int32, n int) {
+	v1 = v1[:n]
+	v2 = v2[:n]
+	for i := range v1 {
+		t := v1[i] - v2[i]
+		v1[i] += v2[i]
+		v2[i] = t
+	}
+}

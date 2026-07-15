@@ -176,6 +176,16 @@ func (sce *SCE) dequantScalefactors() {
 type CPE struct {
 	MSMask [128]uint8
 	Ch     [2]SCE
+
+	// D2 reconstruction bookkeeping. present marks the element as decoded in
+	// the current frame (ChannelElement.present, spectral_to_sample gating).
+	// commonWindow and msPresent carry decode_cpe's stereo-tool flags to the
+	// reconstruction pass; MaxSFBSte mirrors ChannelElement.max_sfb_ste
+	// (set to ch[0].ics.max_sfb by decode_mid_side_stereo, aacdec.c:1741).
+	present      bool
+	commonWindow bool
+	msPresent    int
+	MaxSFBSte    int
 }
 
 // Config is the decoder configuration established from the first ADTS
@@ -201,6 +211,13 @@ type Decoder struct {
 	// Elems lists the audio channel elements decoded from the last
 	// DecodeFrame call in bitstream order.
 	Elems []ElemRef
+
+	// D2 reconstruction state. randomState is the PNS generator, seeded once
+	// and threaded across every noise band of every frame
+	// (ac->random_state, aacdec.c:1353). dsp holds the IMDCT contexts and
+	// scratch (init_dsp).
+	randomState int32
+	dsp         dspState
 }
 
 // ElemRef identifies one decoded channel element of a frame.
@@ -260,5 +277,6 @@ func (d *Decoder) configure(cfg Config) error {
 	}
 	d.cfg = cfg
 	d.configured = true
+	d.randomState = initRandomState
 	return nil
 }
