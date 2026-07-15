@@ -1,0 +1,106 @@
+# Adapted from github.com/tphakala/go-flac's .golangci.yaml to keep one
+# linting standard across projects. go-aac-specific adaptations:
+#   - added depguard: docs/go-design.md (internal planning repo) requires the
+#     internal/fmath boundary to be enforced mechanically; only
+#     internal/fmath, internal/window, internal/mdct and internal/dsp/lpc.go
+#     may import math
+#   - kept gocritic's ruleguard wired to rules/*.go for modern-Go patterns
+#   - modernize stays disabled: it panicked on Go 1.26 + atomic types in
+#     golangci-lint v2.11.4; re-evaluate on a later linter upgrade
+version: "2"
+output:
+  sort-order:
+    - linter
+    - severity
+    - file
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - dupl
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - iface
+    - ineffassign
+    - misspell
+    - nilerr
+    - nilnil
+    - predeclared
+    - prealloc
+    - revive
+    - staticcheck
+    - testifylint
+    - thelper
+    - unconvert
+    - wastedassign
+  disable:
+    - unused
+  settings:
+    depguard:
+      rules:
+        fmath-boundary:
+          # docs/go-design.md: internal/fmath is the only per-frame code path
+          # that imports math; window/mdct/tx table generation and the TNS LPC
+          # kernel are the documented exemptions (tx uses math only in its
+          # init-time twiddle generation, like mdct). Tests may use math for
+          # golden-value verification. Only the float math package is fenced;
+          # math/bits and friends are not.
+          #
+          # tools/ is exempt as well: those are offline generators and diff
+          # harnesses, not codec code. The corpus generator synthesizes test
+          # signals with math.Sin, which fmath does not (and should not) wrap --
+          # fmath exists to fence the encoder's per-frame numeric surface, and a
+          # tool that runs once to produce a fixture is not on that surface.
+          list-mode: lax
+          files:
+            - $all
+            - "!$test"
+            - "!**/internal/fmath/**"
+            - "!**/internal/window/**"
+            - "!**/internal/mdct/**"
+            - "!**/internal/tx/**"
+            - "!**/internal/dsp/lpc.go"
+            - "!**/tools/**"
+          deny:
+            - pkg: "math$"
+              desc: import internal/fmath instead (fmath boundary, docs/go-design.md)
+    gocognit:
+      min-complexity: 50
+    gocritic:
+      # gocritic auto-enables the ruleguard check when settings.ruleguard.rules
+      # is set; the rules/*.go matchers carry the //go:build ruleguard tag so
+      # the normal toolchain ignores them.
+      disabled-checks:
+        - commentFormatting
+        - commentedOutCode
+      enabled-tags:
+        - style
+        - diagnostic
+        - performance
+      settings:
+        ruleguard:
+          rules: "rules/*.go"
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+        - name: exported
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+    exhaustive:
+      default-signifies-exhaustive: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+  new: false

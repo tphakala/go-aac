@@ -1,0 +1,47 @@
+# Build artifacts
+/bin/
+*.exe
+*.test
+*.out
+
+# Coverage and profiling
+coverage.out
+coverage.txt
+*.cov
+*.prof
+*.pprof
+
+# Planning artifacts must never reach the public repo (canonical copies live
+# in the internal Forgejo tphakala/go-aac repo under docs/).
+/docs/
+
+# C dump harness (arrives in Phase 0b): binary and scratch fixture output.
+# Committed fixtures live under internal/*/testdata/ and are never ignored.
+tools/cdump/cdump
+tools/cdump/*.f32
+tools/cdump/*.f64
+tools/gentables/gentables
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.serena/
+
+# local tool cache (sentrux/opencode/etc.)
+cache/
+
+# CodeGraph index database (local code intelligence)
+.codegraph/
+tools/cquant/cquant
+
+# psy model fixture harness (arrives in Phase 2): binaries and scratch
+# output; committed fixtures live under internal/psy/testdata/.
+tools/cpsy/cpsy
+tools/cpsy/cpsy_neuter
+tools/cnmr/cnmr
+tools/cnmr/cnmrtrace
+tools/ctns/ctns
+tools/ctwoloop/ctwoloop
+tools/corder/corder

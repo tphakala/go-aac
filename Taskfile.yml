@@ -1,0 +1,66 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  BENCH_TIME: 2s
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build all packages
+    cmds:
+      - go build ./...
+
+  test:
+    desc: Run all tests (verbose)
+    cmds:
+      - go test -v ./...
+
+  test:short:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  bench:
+    desc: Run all benchmarks
+    cmds:
+      - go test -bench=. -benchmem -benchtime={{.BENCH_TIME}} ./...
+
+  vet:
+    desc: Run go vet for amd64 and arm64
+    cmds:
+      - GOARCH=amd64 go vet ./...
+      - GOARCH=arm64 go vet ./...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  tidy:
+    desc: Tidy and verify go.mod
+    cmds:
+      - go mod tidy
+      - go mod verify
+
+  hooks:install:
+    desc: Point git at the repo's .githooks directory
+    cmds:
+      - git config core.hooksPath .githooks
+
+  check:
+    desc: Full local gate (build, vet, lint, race tests)
+    cmds:
+      - task: build
+      - task: vet
+      - task: lint
+      - task: test:race

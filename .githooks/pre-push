@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+# Fast pre-push sanity gate: build and vet only. The full race test suite and
+# lint run in CI (.github/workflows/ci.yml) and `task check` runs them
+# locally before a release. No remote is configured during Phase 0a, so this
+# hook is inert until the GitHub mirror is added; it is installed now so the
+# gate exists from day one.
+echo "Running pre-push checks (build + vet)..."
+go build ./...
+go vet ./...
+echo "All pre-push checks passed!"
