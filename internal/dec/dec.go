@@ -266,11 +266,20 @@ func (d *Decoder) configure(cfg Config) error {
 	if cfg.FrameLenShort {
 		return fmt.Errorf("%w: 960-sample frames", ErrUnsupported)
 	}
+	// Configure the slot this channel config uses and drop the other, so a
+	// pooled decoder that reconfigures (for example stereo then mono) does not
+	// leave a populated element from the previous stream. Without this a
+	// malformed mono stream carrying a CPE would decode into the retained slot
+	// (the che != nil guard in decodeFrameGA would pass) and emit two channels
+	// of stale audio instead of being rejected. The C frees elements absent
+	// from the new layout in che_configure (aacdec.c av_freep(&ac->che...)).
 	switch cfg.ChanConfig {
 	case 1:
-		d.che[TypeSCE][0] = &CPE{}
+		d.che[TypeSCE][0] = reuseCPE(d.che[TypeSCE][0])
+		d.che[TypeCPE][0] = nil
 	case 2:
-		d.che[TypeCPE][0] = &CPE{}
+		d.che[TypeCPE][0] = reuseCPE(d.che[TypeCPE][0])
+		d.che[TypeSCE][0] = nil
 	default:
 		return fmt.Errorf("%w: channel configuration %d", ErrUnsupported,
 			cfg.ChanConfig)
@@ -279,4 +288,44 @@ func (d *Decoder) configure(cfg Config) error {
 	d.configured = true
 	d.randomState = initRandomState
 	return nil
+}
+
+// reuseCPE returns a zeroed channel element for the given slot, reusing the
+// existing allocation when one is present so a pooled decoder that reconfigures
+// (Reset for a new stream, ResetRaw) allocates nothing. A fresh decoder's slot
+// is nil and gets one allocation, exactly as before; the differential gates are
+// unaffected because a single stream configures its slot once.
+func reuseCPE(che *CPE) *CPE {
+	if che == nil {
+		return &CPE{}
+	}
+	*che = CPE{}
+	return che
+}
+
+// ResetADTS rearms the decoder for a fresh ADTS stream while keeping the
+// allocated channel elements, the Elems backing array and the dsp IMDCT
+// contexts, so a pooled caller (pcm.Decoder.Reset) re-decodes with zero
+// allocation. The next frame's ADTS header reconfigures the layout via
+// configure, which reuses the retained che allocation.
+func (d *Decoder) ResetADTS() {
+	d.adts = true
+	d.configured = false
+	d.cfg = Config{}
+	d.Elems = d.Elems[:0]
+}
+
+// ResetRaw rearms the decoder for a fresh raw stream described by asc, reusing
+// the retained allocations like ResetADTS. It configures immediately (raw has
+// no per-frame header) so Config and Channels are valid before the first frame.
+func (d *Decoder) ResetRaw(asc []byte) error {
+	cfg, err := ParseASC(asc)
+	if err != nil {
+		return err
+	}
+	d.adts = false
+	d.configured = false
+	d.cfg = Config{}
+	d.Elems = d.Elems[:0]
+	return d.configure(cfg)
 }

@@ -32,6 +32,7 @@ tools/cdec2/cdec2
 .idea/
 .vscode/
 .serena/
+.claude/
 
 # local tool cache (sentrux/opencode/etc.)
 cache/

@@ -50,8 +50,41 @@
 // required, which is out of scope for v1; the low-level aac package plus
 // an external muxer is the escape hatch.
 //
+// # Decoding
+//
+// NewDecoder wraps an io.Reader and decodes an AAC-LC stream to interleaved
+// little-endian S16 PCM. It mirrors go-flac's pcm.Decoder: NewDecoder, Info,
+// Read (io.Reader), WriteTo (io.WriterTo) and Reset for pooling.
+//
+//	d, err := aacpcm.NewDecoder(r)
+//	if err != nil {
+//	    // classify with errors.Is against aacpcm.ErrCorruptStream or aacpcm.ErrUnsupported
+//	}
+//	info := d.Info() // SampleRate, Channels, Profile
+//	_, err = io.Copy(w, d)
+//
+// ADTS is the default: the framer locates the 0xFFF syncword, resyncs past
+// leading or mid-stream garbage, reads each frame by its ADTS length and
+// reconstructs it. Info is valid immediately after NewDecoder, which peeks the
+// first header. Raw access units described by an AudioSpecificConfig are opt in
+// through WithRawStream; raw carries no syncword, so the units are
+// length-prefixed (2-byte big-endian, a go-aac framing convention).
+//
+// The S16 output is the decoder's native S32P samples shifted right by 16,
+// which is byte-identical to "ffmpeg -c:a aac_fixed -f s16le" under bitexact,
+// including Apple afconvert LC streams. Malformed input never panics: the API
+// is recover-free and returns wrapped ErrCorruptStream or ErrUnsupported
+// sentinels (testable with errors.Is). A truncated final frame delivers every
+// complete frame and then reports ErrCorruptStream. A mid-stream sample-rate or
+// channel change is reported as ErrUnsupported after the first configuration's
+// frames, because a single interleaved s16le stream cannot signal the change
+// (the C decoder re-initializes instead, which a future segmented API could
+// match). A pooled Decoder decodes at zero allocations per frame in steady
+// state.
+//
 // # Concurrency
 //
 // An Encoder is not safe for concurrent use; use one per goroutine.
-// EncodeInterleaved is safe for concurrent use.
+// EncodeInterleaved is safe for concurrent use. A Decoder is likewise not safe
+// for concurrent use.
 package pcm

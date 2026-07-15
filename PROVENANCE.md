@@ -33,6 +33,8 @@ The decoder is ported from the same pinned tree. Note it lives under
 this commit:
 
 - libavcodec/aac/aacdec.c (decoder core, ADTS/ASC parsing, syntax elements)
+- libavcodec/adts_header.c (ff_adts_header_parse, the ADTS frame header the
+  streaming decode API frames on)
 - libavcodec/aac/aacdec_tab.c (VLC construction, `init_base_tables`)
 - libavcodec/aac/aacdec_proc_template.c (spectral symbol decode loop)
 - libavcodec/aac/aacdec_dsp_template.c (`imdct_and_windowing`, USE_FIXED)

@@ -91,3 +91,28 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
+
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # A short bounded run of each decode-path fuzz target on every build.
+      # Any crash a run finds is committed under testdata/fuzz as a regression
+      # seed, so the corpus grows monotonically. These are smoke runs, not a
+      # substitute for a long local fuzz session.
+      - name: Fuzz ADTS parser
+        run: go test -run='^$' -fuzz=FuzzParseADTS -fuzztime=20s ./internal/dec/
+      - name: Fuzz ASC parser
+        run: go test -run='^$' -fuzz=FuzzParseASC -fuzztime=15s ./internal/dec/
+      - name: Fuzz frame decode
+        run: go test -run='^$' -fuzz=FuzzDecodeFrame -fuzztime=20s ./internal/dec/
+      - name: Fuzz public stream decode
+        run: go test -run='^$' -fuzz=FuzzDecodeStream -fuzztime=20s ./pcm/

@@ -17,14 +17,12 @@ Approach), so the pieces marked done are done in the strong sense.
 - **Encoder: complete for AAC-LC.** All three FFmpeg coders (NMR, twoloop,
   fast), all four coding tools (TNS, PNS, M/S, I/S), mono and stereo, 44.1 and
   48 kHz, ADTS output. The NMR coder is the default, as it is upstream.
-- **Decoder: in progress, not yet usable end to end.** The fixed-point
-  flavor, validated bit-exactly against `ffmpeg -c:a aac_fixed`. Landed so
-  far: bitstream and framing parse (ADTS, AudioSpecificConfig) plus the
-  quantized spectral symbol decode (1,999,224 symbols byte-identical to the C
-  across the test corpus), and the int32 inverse MDCT with the integer windows
-  and overlap-add (bit-exact on every dumped value). Still to come:
-  dequantization and tool application (TNS/PNS/M/S/I/S), full PCM
-  reconstruction, and the public decoder API.
+- **Decoder: usable for AAC-LC.** Pure fixed point, producing output identical
+  to `ffmpeg -c:a aac_fixed` at the sample level. The public `pcm.NewDecoder`
+  streams an ADTS (or raw plus ASC) AAC-LC stream to interleaved little-endian
+  S16 PCM, matching the oracle byte for byte across the test corpus and on Apple
+  afconvert output, with no cgo. Mono and stereo, 44.1 and 48 kHz. Not yet
+  covered: HE-AAC (SBR/PS), 960-sample frames, and channel configs above stereo.
 
 Quality tracks the C encoder closely. At 96/128/192 kbps stereo with the NMR
 coder on both sides, decoded PSNR is within **+-0.04 dB** of FFmpeg's own
@@ -108,6 +106,24 @@ sample stride.
 The package name deliberately collides with `go-flac/pcm`; import it with an
 alias (`aacpcm`), which is ordinary Go practice and lets a consumer switch
 between the two encoders with the same call shape.
+
+Decoding mirrors go-flac's `pcm.Decoder`: an AAC-LC stream in via `io.Reader`,
+interleaved little-endian S16 PCM out.
+
+```go
+d, err := aacpcm.NewDecoder(r) // ADTS by default, resynced past leading garbage
+if err != nil {                // classify with errors.Is against aacpcm.ErrCorruptStream or aacpcm.ErrUnsupported
+    return err
+}
+info := d.Info()       // SampleRate, Channels, Profile, valid immediately
+_, err = io.Copy(w, d) // WriteTo drains the whole decode; Read fills any buffer
+```
+
+The decoded PCM is byte-identical to `ffmpeg -c:a aac_fixed -f s16le` on every
+LC stream tested, including Apple afconvert output. The decoder never panics on
+malformed input (it returns wrapped `ErrCorruptStream` or `ErrUnsupported`
+sentinels) and runs at zero allocations per frame in steady state. Raw access
+units plus an `AudioSpecificConfig` are opt in via `aacpcm.WithRawStream(asc)`.
 
 ### aac: the low-level codec
 
