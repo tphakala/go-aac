@@ -25,8 +25,15 @@ func ffmpegBin(t *testing.T) string {
 	if p == "" {
 		skipOrFatalOracle(t, "GOAAC_FFMPEG is not set; skipping the C differential gate")
 	}
-	if _, err := os.Stat(p); err != nil {
+	fi, err := os.Stat(p)
+	if err != nil {
 		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is not usable: %v", p, err))
+	}
+	// Stat succeeds on a directory, and the easy mistake is pointing at the
+	// FFmpeg build tree instead of the binary inside it. Catch it here, where
+	// the message can say so, rather than at the first exec.
+	if fi.IsDir() {
+		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is a directory, not the ffmpeg binary", p))
 	}
 	return p
 }

@@ -43,11 +43,15 @@ check_identities() {
             fi
         fi
 
+        # -F -x so the address is compared literally: it contains dots, which
+        # a regex would treat as wildcards, letting a lookalike like
+        # usersXnoreply.github.com pass as allowed.
+        #
         # grep -v exits 1 when it filters everything out, which is the success
         # case here, so || true is about grep's exit code, not about hiding a
         # failed query.
         bad=$(printf '%s\n' "$emails" | grep -v '^$' | sort -u |
-            grep -v "^${ALLOWED_EMAIL}$" || true)
+            grep -Fxv "$ALLOWED_EMAIL" || true)
 
         if [ -n "$bad" ]; then
             echo "ERROR: refusing to push. These commit identities are not the noreply address:"
