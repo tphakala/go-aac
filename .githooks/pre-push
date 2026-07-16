@@ -1,11 +1,81 @@
 #!/bin/sh
 set -eu
 
+# --- identity guard ---------------------------------------------------
+# A real email address must NEVER reach a public commit, personal or work.
+# Only the GitHub noreply identity is allowed.
+#
+# This is a hard gate rather than a reminder because the mistake is not
+# recoverable in practice: GitHub retains refs/pull/* forever, so an address
+# that reaches a pull request cannot be removed by a later force-push. The
+# only remedies are a GitHub Support purge or replacing the repository. The
+# machine's GLOBAL git config is a work address, so any repo that forgets to
+# set a local user.email inherits the wrong identity silently.
+ALLOWED_EMAIL="7030001+tphakala@users.noreply.github.com"
+ZERO="0000000000000000000000000000000000000000"
+
+check_identities() {
+    # git passes the destination remote name as $1 (and its URL as $2).
+    remote_name="$1"
+
+    while read -r _local_ref local_sha _remote_ref remote_sha; do
+        # A branch deletion pushes a zero local sha; nothing to inspect.
+        [ "$local_sha" = "$ZERO" ] && continue
+
+        # Fail CLOSED. Suppressing git log's status would turn an unreadable
+        # range into an empty result, and an empty result reads as "no bad
+        # identities", so a broken query would wave the push through. That is
+        # the same silent-pass failure this guard exists to prevent.
+        if [ "$remote_sha" = "$ZERO" ]; then
+            # New branch. Exclude only commits already on the remote being
+            # pushed to. Plain --remotes excludes commits reachable from ANY
+            # configured remote, so a commit living only on a different remote
+            # would slip past unchecked.
+            if ! emails=$(git log --format='%ae%n%ce' "$local_sha" \
+                --not --remotes="$remote_name"); then
+                echo "ERROR: refusing to push, cannot inspect commits reachable from $local_sha"
+                return 1
+            fi
+        else
+            if ! emails=$(git log --format='%ae%n%ce' "${remote_sha}..${local_sha}"); then
+                echo "ERROR: refusing to push, cannot inspect range ${remote_sha}..${local_sha}"
+                return 1
+            fi
+        fi
+
+        # -F -x so the address is compared literally: it contains dots, which
+        # a regex would treat as wildcards, letting a lookalike like
+        # usersXnoreply.github.com pass as allowed.
+        #
+        # grep -v exits 1 when it filters everything out, which is the success
+        # case here, so || true is about grep's exit code, not about hiding a
+        # failed query.
+        bad=$(printf '%s\n' "$emails" | grep -v '^$' | sort -u |
+            grep -Fxv "$ALLOWED_EMAIL" || true)
+
+        if [ -n "$bad" ]; then
+            echo "ERROR: refusing to push. These commit identities are not the noreply address:"
+            echo "$bad" | sed 's/^/  /'
+            echo ""
+            echo "Allowed identity: $ALLOWED_EMAIL"
+            echo "Fix with: git config user.email \"$ALLOWED_EMAIL\""
+            echo "then rewrite the offending commits (amend, rebase, or filter-branch)."
+            echo ""
+            echo "A real address in public history is effectively permanent:"
+            echo "GitHub retains refs/pull/* forever, so a force-push will not undo it."
+            return 1
+        fi
+    done
+    return 0
+}
+
+echo "Checking commit identities..."
+check_identities "${1:-origin}"
+echo "Commit identities OK."
+
 # Fast pre-push sanity gate: build and vet only. The full race test suite and
 # lint run in CI (.github/workflows/ci.yml) and `task check` runs them
-# locally before a release. No remote is configured during Phase 0a, so this
-# hook is inert until the GitHub mirror is added; it is installed now so the
-# gate exists from day one.
+# locally before a release.
 echo "Running pre-push checks (build + vet)..."
 go build ./...
 go vet ./...

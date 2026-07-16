@@ -19,9 +19,34 @@ func ffmpegBin(t *testing.T) string {
 	t.Helper()
 	p := os.Getenv("GOAAC_FFMPEG")
 	if p == "" {
-		t.Skip("pinned ffmpeg not set; set GOAAC_FFMPEG")
+		skipOrFatalOracle(t, "pinned ffmpeg not set; set GOAAC_FFMPEG")
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is not usable: %v", p, err))
+	}
+	// Stat succeeds on a directory, and the easy mistake is pointing at the
+	// FFmpeg build tree instead of the binary inside it. Catch it here, where
+	// the message can say so, rather than at the first exec.
+	if fi.IsDir() {
+		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is a directory, not the ffmpeg binary", p))
 	}
 	return p
+}
+
+// skipOrFatalOracle skips the calling test, or fails it when
+// GOAAC_REQUIRE_ORACLE is set to a non-empty value.
+//
+// Skipping is right for a contributor without the pinned FFmpeg. It is wrong
+// for a runner whose whole job is to run the gate: a mistyped path or a broken
+// build would skip every differential test and still print ok. The CI oracle
+// job sets GOAAC_REQUIRE_ORACLE so that an absent oracle reports red.
+func skipOrFatalOracle(t *testing.T, msg string) {
+	t.Helper()
+	if os.Getenv("GOAAC_REQUIRE_ORACLE") != "" {
+		t.Fatalf("GOAAC_REQUIRE_ORACLE is set, so a missing oracle is a failure: %s", msg)
+	}
+	t.Skip(msg)
 }
 
 // corpusWAV locates a corpus recording under GOAAC_CORPUS_DIR, skipping the
