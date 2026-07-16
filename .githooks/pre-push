@@ -15,18 +15,39 @@ ALLOWED_EMAIL="7030001+tphakala@users.noreply.github.com"
 ZERO="0000000000000000000000000000000000000000"
 
 check_identities() {
+    # git passes the destination remote name as $1 (and its URL as $2).
+    remote_name="$1"
+
     while read -r _local_ref local_sha _remote_ref remote_sha; do
         # A branch deletion pushes a zero local sha; nothing to inspect.
         [ "$local_sha" = "$ZERO" ] && continue
 
+        # Fail CLOSED. Suppressing git log's status would turn an unreadable
+        # range into an empty result, and an empty result reads as "no bad
+        # identities", so a broken query would wave the push through. That is
+        # the same silent-pass failure this guard exists to prevent.
         if [ "$remote_sha" = "$ZERO" ]; then
-            # New branch: inspect every commit not already on a remote.
-            bad=$(git log --format='%ae%n%ce' "$local_sha" --not --remotes 2>/dev/null |
-                sort -u | grep -v "^${ALLOWED_EMAIL}$" || true)
+            # New branch. Exclude only commits already on the remote being
+            # pushed to. Plain --remotes excludes commits reachable from ANY
+            # configured remote, so a commit living only on a different remote
+            # would slip past unchecked.
+            if ! emails=$(git log --format='%ae%n%ce' "$local_sha" \
+                --not --remotes="$remote_name"); then
+                echo "ERROR: refusing to push, cannot inspect commits reachable from $local_sha"
+                return 1
+            fi
         else
-            bad=$(git log --format='%ae%n%ce' "${remote_sha}..${local_sha}" 2>/dev/null |
-                sort -u | grep -v "^${ALLOWED_EMAIL}$" || true)
+            if ! emails=$(git log --format='%ae%n%ce' "${remote_sha}..${local_sha}"); then
+                echo "ERROR: refusing to push, cannot inspect range ${remote_sha}..${local_sha}"
+                return 1
+            fi
         fi
+
+        # grep -v exits 1 when it filters everything out, which is the success
+        # case here, so || true is about grep's exit code, not about hiding a
+        # failed query.
+        bad=$(printf '%s\n' "$emails" | grep -v '^$' | sort -u |
+            grep -v "^${ALLOWED_EMAIL}$" || true)
 
         if [ -n "$bad" ]; then
             echo "ERROR: refusing to push. These commit identities are not the noreply address:"
@@ -45,7 +66,7 @@ check_identities() {
 }
 
 echo "Checking commit identities..."
-check_identities
+check_identities "${1:-origin}"
 echo "Commit identities OK."
 
 # Fast pre-push sanity gate: build and vet only. The full race test suite and

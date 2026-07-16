@@ -143,9 +143,9 @@ static uint8_t *read_all(const char *path, size_t *size)
         fprintf(stderr, "%s: cannot allocate %ld bytes\n", path, n);
         exit(1);
     }
-    if (fread(buf, 1, n, f) != (size_t)n) { perror("read"); exit(1); }
+    if (fread(buf, 1, (size_t)n, f) != (size_t)n) { perror("read"); exit(1); }
     fclose(f);
-    *size = n;
+    *size = (size_t)n;
     return buf;
 }
 
@@ -234,7 +234,7 @@ int main(int argc, char **argv)
         }
         fprintf(g_out, "FRAME %d\n", fidx);
         av_packet_unref(pkt);
-        if (av_new_packet(pkt, flen) < 0) {
+        if (av_new_packet(pkt, (int)flen) < 0) {
             fprintf(stderr, "cdec: av_new_packet(%zu) failed at frame %d\n",
                     flen, fidx);
             fclose(g_out);
