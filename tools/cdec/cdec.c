@@ -134,10 +134,15 @@ static uint8_t *read_all(const char *path, size_t *size)
 {
     FILE *f = fopen(path, "rb");
     if (!f) { perror(path); exit(1); }
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) < 0) { perror(path); exit(1); }
     long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t *buf = av_mallocz(n + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (n < 0) { perror(path); exit(1); }
+    if (fseek(f, 0, SEEK_SET) < 0) { perror(path); exit(1); }
+    uint8_t *buf = av_mallocz((size_t)n + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!buf) {
+        fprintf(stderr, "%s: cannot allocate %ld bytes\n", path, n);
+        exit(1);
+    }
     if (fread(buf, 1, n, f) != (size_t)n) { perror("read"); exit(1); }
     fclose(f);
     *size = n;
@@ -229,7 +234,12 @@ int main(int argc, char **argv)
         }
         fprintf(g_out, "FRAME %d\n", fidx);
         av_packet_unref(pkt);
-        av_new_packet(pkt, flen);
+        if (av_new_packet(pkt, flen) < 0) {
+            fprintf(stderr, "cdec: av_new_packet(%zu) failed at frame %d\n",
+                    flen, fidx);
+            fclose(g_out);
+            return 1;
+        }
         memcpy(pkt->data, data + pos, flen);
         int serr = avcodec_send_packet(avctx, pkt);
         int rerr = avcodec_receive_frame(avctx, frame);
