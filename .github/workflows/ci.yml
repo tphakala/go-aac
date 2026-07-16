@@ -11,6 +11,10 @@ env:
   # Pinned to match the local toolchain (golangci-lint 2.12.2) so the git
   # hooks, `task lint`, and CI all run the identical linter version.
   GOLANGCI_LINT_VERSION: 'v2.12.2'
+  # The differential and PSNR gates are only meaningful against FFmpeg built
+  # from this exact commit. A distro ffmpeg predates the NMR coder this port
+  # targets and is not a valid oracle. Keep in sync with PROVENANCE.md.
+  FFMPEG_COMMIT: 'd09d5afc3aebede25d2d245ee23b75a47ea17c3a'
 
 permissions:
   contents: read
@@ -116,3 +120,68 @@ jobs:
         run: go test -run='^$' -fuzz=FuzzDecodeFrame -fuzztime=20s ./internal/dec/
       - name: Fuzz public stream decode
         run: go test -run='^$' -fuzz=FuzzDecodeStream -fuzztime=20s ./pcm/
+
+  # The differential/PSNR gates are the only check that can tell a correct
+  # encoder from a plausible-but-wrong one; PSNR alone cannot see a misported
+  # psy constant or a drifting bit reservoir. Without this job they skip on CI
+  # and still print ok, so a broken encoder can be fully green (it happened: a
+  # bad rate-control guard failed every 128k encode past 15 green checks).
+  oracle:
+    name: Differential oracle gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Restore pinned FFmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg-oracle
+          # Keyed on the pin, so the build happens once and any change to
+          # FFMPEG_COMMIT builds a fresh oracle instead of reusing a stale one.
+          key: ffmpeg-oracle-${{ runner.os }}-${{ env.FFMPEG_COMMIT }}
+
+      - name: Build pinned FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nasm
+          git init ffmpeg-src
+          cd ffmpeg-src
+          git remote add origin https://github.com/FFmpeg/FFmpeg.git
+          git fetch --depth 1 origin "$FFMPEG_COMMIT"
+          git checkout FETCH_HEAD
+          # Refuse to build anything other than the pin.
+          test "$(git rev-parse HEAD)" = "$FFMPEG_COMMIT"
+          # Same flags as the validated local oracle. --disable-programs
+          # --enable-ffmpeg only skips building ffprobe/ffplay, which the gates
+          # never invoke; it does not change libav* behaviour.
+          ./configure --disable-doc --disable-network --disable-autodetect \
+                      --disable-programs --enable-ffmpeg
+          make -j"$(nproc)"
+          mkdir -p ~/ffmpeg-oracle
+          cp ffmpeg ~/ffmpeg-oracle/ffmpeg
+
+      - name: Verify the oracle provides what the gates need
+        run: |
+          set -euo pipefail
+          ~/ffmpeg-oracle/ffmpeg -hide_banner -version | head -1
+          ~/ffmpeg-oracle/ffmpeg -hide_banner -decoders | grep -qw aac_fixed
+          ~/ffmpeg-oracle/ffmpeg -hide_banner -encoders | grep -qw aac
+
+      - name: Run the differential and PSNR gates
+        # GOAAC_REQUIRE_ORACLE turns a missing oracle into a failure instead of
+        # a skip. Without it this job could silently degrade to the very bug it
+        # closes. -count=1 because setup-go restores the Go test cache, and a
+        # cached ok would otherwise satisfy the gate without running it.
+        run: |
+          GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
+          GOAAC_REQUIRE_ORACLE=1 \
+            go test -count=1 ./...

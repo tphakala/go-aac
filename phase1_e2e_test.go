@@ -23,12 +23,28 @@ func ffmpegBin(t *testing.T) string {
 	t.Helper()
 	p := os.Getenv("GOAAC_FFMPEG")
 	if p == "" {
-		t.Skip("GOAAC_FFMPEG is not set; skipping the C differential gate")
+		skipOrFatalOracle(t, "GOAAC_FFMPEG is not set; skipping the C differential gate")
 	}
 	if _, err := os.Stat(p); err != nil {
-		t.Skipf("GOAAC_FFMPEG=%q is not usable: %v", p, err)
+		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is not usable: %v", p, err))
 	}
 	return p
+}
+
+// skipOrFatalOracle skips the calling test, or fails it when
+// GOAAC_REQUIRE_ORACLE is set to a non-empty value.
+//
+// Skipping is right for a contributor without the pinned FFmpeg. It is wrong
+// for a runner whose whole job is to run the gate: a mistyped path or a broken
+// build would skip every differential test and still print ok, which is exactly
+// how a rate-control regression once passed CI green. The CI oracle job sets
+// GOAAC_REQUIRE_ORACLE so that an absent oracle reports red.
+func skipOrFatalOracle(t *testing.T, msg string) {
+	t.Helper()
+	if os.Getenv("GOAAC_REQUIRE_ORACLE") != "" {
+		t.Fatalf("GOAAC_REQUIRE_ORACLE is set, so a missing oracle is a failure: %s", msg)
+	}
+	t.Skip(msg)
 }
 
 // synthTonal generates n samples of a deterministic three-tone mix, the
