@@ -149,19 +149,45 @@ from the source PCM, not from the decoded AAC length.
 
 ## Benchmarking
 
-Single-threaded, Apple M-series, 48 kHz, 128 kbps:
+`scripts/bench-encoders.sh` compares go-aac against FFmpeg's native AAC
+encoder, the C this library is ported from, on the same input (encode
+single-threaded, one process, file in and file out), reporting wall time, CPU
+seconds, peak RSS and stream size. `GOAAC_FFMPEG` must point at the pinned
+oracle build; a distro FFmpeg is refused, because 7.x and earlier ship a
+different coder set whose `anmr` is not the `nmr` trellis this library ports.
 
-| Coder | Channels | x realtime |
-| ----- | -------- | ---------: |
-| NMR (default) | mono | 65x |
-| NMR (default) | stereo | 38x |
-| twoloop | stereo | 48x |
-| fast | mono | 206x |
+```sh
+GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh          # generated reproducible input
+GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh my.wav   # your own WAV
+```
+
+Results on a 120 s 48 kHz mono recording at 128 kbps, single-threaded. The
+ratio is CPU seconds, go-aac over FFmpeg; the FFmpeg CLI spawns helper threads,
+so CPU time compares more honestly than wall time.
+
+| Coder | Platform | go-aac | FFmpeg | go/C |
+| ----- | -------- | -----: | -----: | ---: |
+| NMR (default) | Raspberry Pi 5 | 19x realtime | 40x | 2.09x |
+| NMR (default) | x86_64 (i7-1260P) | 43x | 98x | 2.09x |
+| NMR (default) | Apple M4 Pro | 68x | 179x | 2.64x |
+| twoloop | x86_64 | 78x | 156x | 1.74x |
+| fast | x86_64 | 143x | 308x | 1.87x |
+
+go-aac runs at roughly **twice the CPU time of the C** and in **about a third
+of the memory** (4.1 MB peak RSS against 10.4 to 13.3 MB). Stream sizes match
+FFmpeg to within 0.001% for the NMR and fast coders at the same bitrate.
+
+The gap is **not** FFmpeg's hand-written assembly: disabling it (`-cpuflags 0`)
+changes AAC encoding by about 1%. It is compiler auto-vectorization. GCC emits
+631 packed floating-point arithmetic instructions in `aaccoder.o` from plain C,
+concentrated in the NMR quantizer search; Go's compiler emits none anywhere in
+the equivalent package. Closing the gap therefore means hand-writing in Go what
+C compilers generate for free, which is tracked as future work. The scalar port
+remains the canonical reference.
 
 Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
 and stereo. Decoding is far cheaper, roughly 3000x real time for mono and 1500x
 for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
-SIMD kernels are future work; the scalar port is the canonical reference.
 
 ## License
 
