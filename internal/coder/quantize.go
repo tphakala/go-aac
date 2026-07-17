@@ -135,10 +135,6 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	size := len(in)
 	var cost, qenergy float32
 	d := cbDescriptors[cb]
-	dim := 4
-	if d.pair {
-		dim = 2
-	}
 	totBits := 0
 
 	if d.zeroLike {
@@ -172,87 +168,164 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	sb := tables.SpectralBits[cb-1]
 	cv := tables.CodebookVectors[cb-1]
 	rng := int(tables.CBRange[cb])
-	for i := 0; i < size; i += dim {
-		curidx := 0
-		for j := range dim {
-			curidx *= rng
-			curidx += int(c.qcoefs[i+j]) + off
-		}
-		curbits := int(sb[curidx])
-		vec := cv[curidx*dim:]
-		var rd float32
-		if d.unsigned {
-			for j := range dim {
-				t := absf(in[i+j])
-				var quantized float32
-				if d.escape && vec[j] == 64.0 {
-					if t >= clippedEscape {
-						quantized = clippedEscape
-						curbits += 21
-					} else {
-						cq := clip(quant(t, q, rounding), 0, (1<<13)-1)
-						quantized = float32(tables.Pow43[cq] * iq)
-						curbits += log2i(cq)*2 - 4 + 1
-					}
-				} else {
-					quantized = float32(vec[j] * iq) // no FMA into di below
-				}
-				di := t - quantized
-				if out != nil {
-					if in[i+j] >= 0 {
-						out[i+j] = quantized
-					} else {
-						out[i+j] = -quantized
-					}
-				}
-				if vec[j] != 0.0 {
-					curbits++
-				}
-				t2 := float32(quantized * quantized) // no cross-statement FMA
-				qenergy += t2
-				t3 := float32(di * di)
-				rd += t3
+	// Specialize the coefficient loop by codebook dimension, chosen once by
+	// d.pair (BT_PAIR in the C). dim is 2 for pair codebooks and 4 for quad
+	// codebooks and is constant per call; keeping it a runtime value in the
+	// folded body forced a compare and branch per coefficient and blocked the
+	// inner-loop unroll. The two bodies mirror the C's per-specialization
+	// axes: BT_PAIR selects dim, BT_UNSIGNED selects the inner body, BT_ESC
+	// guards the escape. BT_ESC is only ever set together with BT_PAIR in the
+	// C (ESC/ESC_RTZ set BT_PAIR; SQUAD/UQUAD are the only quads and set
+	// neither), so the escape branch and escape emission live only in the
+	// dim==2 body.
+	if d.pair {
+		for i := 0; i < size; i += 2 {
+			curidx := 0
+			for j := range 2 {
+				curidx *= rng
+				curidx += int(c.qcoefs[i+j]) + off
 			}
-		} else {
-			for j := range dim {
-				quantized := float32(vec[j] * iq)    // no FMA into di below
-				t2 := float32(quantized * quantized) // no cross-statement FMA
-				qenergy += t2
-				if out != nil {
-					out[i+j] = quantized
-				}
-				di := in[i+j] - quantized
-				t3 := float32(di * di)
-				rd += t3
-			}
-		}
-		tc := float32(rd * lambda) // no cross-statement FMA
-		cost += tc + float32(curbits)
-		totBits += curbits
-		if cost >= uplim {
-			return uplim
-		}
-		if pb != nil {
-			pb.Put(int(sb[curidx]),
-				uint32(tables.SpectralCodes[cb-1][curidx]))
+			curbits := int(sb[curidx])
+			vec := cv[curidx*2:]
+			var rd float32
 			if d.unsigned {
-				for j := range dim {
-					if cv[curidx*dim+j] != 0.0 {
-						var sign uint32
-						if in[i+j] < 0.0 {
-							sign = 1
+				for j := range 2 {
+					t := absf(in[i+j])
+					var quantized float32
+					if d.escape && vec[j] == 64.0 {
+						if t >= clippedEscape {
+							quantized = clippedEscape
+							curbits += 21
+						} else {
+							cq := clip(quant(t, q, rounding), 0, (1<<13)-1)
+							quantized = float32(tables.Pow43[cq] * iq)
+							curbits += log2i(cq)*2 - 4 + 1
 						}
-						pb.Put(1, sign)
+					} else {
+						quantized = float32(vec[j] * iq) // no FMA into di below
+					}
+					di := t - quantized
+					if out != nil {
+						if in[i+j] >= 0 {
+							out[i+j] = quantized
+						} else {
+							out[i+j] = -quantized
+						}
+					}
+					if vec[j] != 0.0 {
+						curbits++
+					}
+					t2 := float32(quantized * quantized) // no cross-statement FMA
+					qenergy += t2
+					t3 := float32(di * di)
+					rd += t3
+				}
+			} else {
+				for j := range 2 {
+					quantized := float32(vec[j] * iq)    // no FMA into di below
+					t2 := float32(quantized * quantized) // no cross-statement FMA
+					qenergy += t2
+					if out != nil {
+						out[i+j] = quantized
+					}
+					di := in[i+j] - quantized
+					t3 := float32(di * di)
+					rd += t3
+				}
+			}
+			tc := float32(rd * lambda) // no cross-statement FMA
+			cost += tc + float32(curbits)
+			totBits += curbits
+			if cost >= uplim {
+				return uplim
+			}
+			if pb != nil {
+				pb.Put(int(sb[curidx]),
+					uint32(tables.SpectralCodes[cb-1][curidx]))
+				if d.unsigned {
+					for j := range 2 {
+						if cv[curidx*2+j] != 0.0 {
+							var sign uint32
+							if in[i+j] < 0.0 {
+								sign = 1
+							}
+							pb.Put(1, sign)
+						}
+					}
+				}
+				if d.escape {
+					for j := range 2 {
+						if cv[curidx*2+j] == 64.0 {
+							coef := clip(quant(absf(in[i+j]), q, rounding), 16, (1<<13)-1)
+							length := log2i(coef)
+							pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
+							pb.Put(length, uint32(coef))
+						}
 					}
 				}
 			}
-			if d.escape {
-				for j := range 2 {
-					if cv[curidx*2+j] == 64.0 {
-						coef := clip(quant(absf(in[i+j]), q, rounding), 16, (1<<13)-1)
-						length := log2i(coef)
-						pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
-						pb.Put(length, uint32(coef))
+		}
+	} else {
+		for i := 0; i < size; i += 4 {
+			curidx := 0
+			for j := range 4 {
+				curidx *= rng
+				curidx += int(c.qcoefs[i+j]) + off
+			}
+			curbits := int(sb[curidx])
+			vec := cv[curidx*4:]
+			var rd float32
+			if d.unsigned {
+				for j := range 4 {
+					t := absf(in[i+j])
+					quantized := float32(vec[j] * iq) // no FMA into di below
+					di := t - quantized
+					if out != nil {
+						if in[i+j] >= 0 {
+							out[i+j] = quantized
+						} else {
+							out[i+j] = -quantized
+						}
+					}
+					if vec[j] != 0.0 {
+						curbits++
+					}
+					t2 := float32(quantized * quantized) // no cross-statement FMA
+					qenergy += t2
+					t3 := float32(di * di)
+					rd += t3
+				}
+			} else {
+				for j := range 4 {
+					quantized := float32(vec[j] * iq)    // no FMA into di below
+					t2 := float32(quantized * quantized) // no cross-statement FMA
+					qenergy += t2
+					if out != nil {
+						out[i+j] = quantized
+					}
+					di := in[i+j] - quantized
+					t3 := float32(di * di)
+					rd += t3
+				}
+			}
+			tc := float32(rd * lambda) // no cross-statement FMA
+			cost += tc + float32(curbits)
+			totBits += curbits
+			if cost >= uplim {
+				return uplim
+			}
+			if pb != nil {
+				pb.Put(int(sb[curidx]),
+					uint32(tables.SpectralCodes[cb-1][curidx]))
+				if d.unsigned {
+					for j := range 4 {
+						if cv[curidx*4+j] != 0.0 {
+							var sign uint32
+							if in[i+j] < 0.0 {
+								sign = 1
+							}
+							pb.Put(1, sign)
+						}
 					}
 				}
 			}
