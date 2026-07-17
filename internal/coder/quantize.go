@@ -168,6 +168,9 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	sb := tables.SpectralBits[cb-1]
 	cv := tables.CodebookVectors[cb-1]
 	rng := int(tables.CBRange[cb])
+	// size <= 96 always (the widest SwbSize1024 entry is 96), so c.qcoefs[:size]
+	// never panics.
+	qcoefs := c.qcoefs[:size]
 	// Specialize the coefficient loop by codebook dimension, chosen once by
 	// d.pair (BT_PAIR in the C). dim is 2 for pair codebooks and 4 for quad
 	// codebooks and is constant per call; keeping it a runtime value in the
@@ -179,18 +182,27 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	// neither), so the escape branch and escape emission live only in the
 	// dim==2 body.
 	if d.pair {
-		for i := 0; i < size; i += 2 {
+		// i+2 <= size enumerates the identical i as i < size: every
+		// scalefactor-band width in SwbSize1024/SwbSize128 is a multiple of 4
+		// (all 764 values verified), so size % 2 == 0. The C loop relies on the
+		// same invariant. inSeg/qSeg are exact dim-length views of in and qcoefs
+		// for this coefficient chunk: they cost one slice bounds check each and
+		// let every inSeg[j]/qSeg[j] load run unchecked (a strided i+j index is
+		// not provable to the bounds checker, but a length-2 slice is).
+		for i := 0; i+2 <= size; i += 2 {
+			inSeg := in[i : i+2]
+			qSeg := qcoefs[i : i+2]
 			curidx := 0
 			for j := range 2 {
 				curidx *= rng
-				curidx += int(c.qcoefs[i+j]) + off
+				curidx += int(qSeg[j]) + off
 			}
 			curbits := int(sb[curidx])
-			vec := cv[curidx*2:]
+			vec := cv[curidx*2 : curidx*2+2]
 			var rd float32
 			if d.unsigned {
 				for j := range 2 {
-					t := absf(in[i+j])
+					t := absf(inSeg[j])
 					var quantized float32
 					if d.escape && vec[j] == 64.0 {
 						if t >= clippedEscape {
@@ -206,7 +218,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					}
 					di := t - quantized
 					if out != nil {
-						if in[i+j] >= 0 {
+						if inSeg[j] >= 0 {
 							out[i+j] = quantized
 						} else {
 							out[i+j] = -quantized
@@ -228,7 +240,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					if out != nil {
 						out[i+j] = quantized
 					}
-					di := in[i+j] - quantized
+					di := inSeg[j] - quantized
 					t3 := float32(di * di)
 					rd += t3
 				}
@@ -246,7 +258,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					for j := range 2 {
 						if cv[curidx*2+j] != 0.0 {
 							var sign uint32
-							if in[i+j] < 0.0 {
+							if inSeg[j] < 0.0 {
 								sign = 1
 							}
 							pb.Put(1, sign)
@@ -256,7 +268,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 				if d.escape {
 					for j := range 2 {
 						if cv[curidx*2+j] == 64.0 {
-							coef := clip(quant(absf(in[i+j]), q, rounding), 16, (1<<13)-1)
+							coef := clip(quant(absf(inSeg[j]), q, rounding), 16, (1<<13)-1)
 							length := log2i(coef)
 							pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
 							pb.Put(length, uint32(coef))
@@ -266,22 +278,31 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 			}
 		}
 	} else {
-		for i := 0; i < size; i += 4 {
+		// i+4 <= size enumerates the identical i as i < size: every
+		// scalefactor-band width in SwbSize1024/SwbSize128 is a multiple of 4
+		// (all 764 values verified), so size % 4 == 0. The C loop relies on the
+		// same invariant. inSeg/qSeg are exact dim-length views of in and qcoefs
+		// for this coefficient chunk: they cost one slice bounds check each and
+		// let every inSeg[j]/qSeg[j] load run unchecked (a strided i+j index is
+		// not provable to the bounds checker, but a length-4 slice is).
+		for i := 0; i+4 <= size; i += 4 {
+			inSeg := in[i : i+4]
+			qSeg := qcoefs[i : i+4]
 			curidx := 0
 			for j := range 4 {
 				curidx *= rng
-				curidx += int(c.qcoefs[i+j]) + off
+				curidx += int(qSeg[j]) + off
 			}
 			curbits := int(sb[curidx])
-			vec := cv[curidx*4:]
+			vec := cv[curidx*4 : curidx*4+4]
 			var rd float32
 			if d.unsigned {
 				for j := range 4 {
-					t := absf(in[i+j])
+					t := absf(inSeg[j])
 					quantized := float32(vec[j] * iq) // no FMA into di below
 					di := t - quantized
 					if out != nil {
-						if in[i+j] >= 0 {
+						if inSeg[j] >= 0 {
 							out[i+j] = quantized
 						} else {
 							out[i+j] = -quantized
@@ -303,7 +324,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					if out != nil {
 						out[i+j] = quantized
 					}
-					di := in[i+j] - quantized
+					di := inSeg[j] - quantized
 					t3 := float32(di * di)
 					rd += t3
 				}
@@ -321,7 +342,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					for j := range 4 {
 						if cv[curidx*4+j] != 0.0 {
 							var sign uint32
-							if in[i+j] < 0.0 {
+							if inSeg[j] < 0.0 {
 								sign = 1
 							}
 							pb.Put(1, sign)
