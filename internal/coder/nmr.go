@@ -85,26 +85,102 @@ type NMRInput struct {
 	LastFramePBCount int   // s->last_frame_pb_count
 }
 
+// floorDiv and ceilDiv round the quotient toward -inf and +inf respectively,
+// for a divisor of either sign. Go's / truncates toward zero, which is the
+// wrong rounding for the negative numerators the trellis window produces.
+func floorDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+func ceilDiv(a, b int) int {
+	q := a / b
+	if a%b != 0 && (a < 0) == (b < 0) {
+		q++
+	}
+	return q
+}
+
 // nmrTrellisStep runs one Viterbi step: for each current-band candidate,
 // find the previous-band candidate minimising dpp[op] + lamsf[d], then set
 // dp[o] = node[o] + that cost and record the back-pointer bp[o].
-// Mirrors aacencdsp.c:nmr_trellis_step_c @ d09d5afc3a (the SCALAR kernel;
-// the archive build contains no FMA here, so every add stays a separate
-// rounding and the strict c < bestc tie-break picks the LOWEST op).
+// Mirrors aacencdsp.c:nmr_trellis_step_c @ d09d5afc3a, the SCALAR kernel.
+// Both accumulations are plain adds with no multiply, so no FMA can arise
+// here and every add stays separately rounded. Separately: walking op in
+// ascending order under a strict c < bestc is what makes a tie pick the
+// LOWEST op.
+//
+// The C tests |d| <= mdiff once per iteration. d is affine in op and falls by
+// step as op rises, so the surviving op values form one contiguous range whose
+// offsets from o are computable once per call. Iterating exactly that range
+// visits the same pairs in the same increasing order, so every float op and
+// the tie-break are unchanged; TestNMRTrellisStepMatchesReference pins the
+// equivalence against the pre-optimisation form.
+//
+// Callers must pass cap(dp), cap(bp), cap(node) >= nCur, cap(dpp) >= nPrev and
+// len(lamsf) >= 2*mdiff+1. The entry re-slices turn the first four into a panic
+// at the call boundary instead of at whichever access first ran off the end,
+// but they check cap, not len: a short slice with spare capacity is silently
+// extended rather than rejected. lamsf is not re-sliced, so like the C it
+// faults only on an access that actually reaches past it.
 func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	nCur, nPrev, base, step, mdiff int) {
+	// Re-slice to the loop bound so the indexing needs no in-loop check.
+	// This is the BCE recipe measured to work in this repo; the lamsf index
+	// is computed and keeps its check, the prover cannot connect it to len.
+	dp = dp[:nCur]
+	bp = bp[:nCur]
+	node = node[:nCur]
+	dpp = dpp[:nPrev]
+
+	// Window as offsets from o: opLo = max(0, o-hiOff), opHi = min(nPrev-1,
+	// o-loOff). With k = o-op, the filter -mdiff <= base+k*step <= mdiff is
+	// lo <= k*step <= hi, so dividing through by step bounds k. Dividing
+	// flips the two bounds when step is negative.
+	lo, hi := -mdiff-base, mdiff-base
+	loOff, hiOff := 0, -1 // empty window
+	switch {
+	case step > 0:
+		loOff, hiOff = ceilDiv(lo, step), floorDiv(hi, step)
+	case step < 0:
+		loOff, hiOff = ceilDiv(hi, step), floorDiv(lo, step)
+	case lo <= 0 && 0 <= hi:
+		// step == 0 makes d constant at base, so the filter either admits
+		// every op or none; it cannot be divided through. o < nCur makes
+		// opLo clamp to 0, and o >= 0 makes opHi clamp to nPrev-1, so these
+		// offsets admit the full [0, nPrev-1].
+		loOff, hiOff = -nPrev, nCur
+	}
+
+	baseIdx := base + mdiff
 	for o := range nCur {
 		best := -1
 		bestc := float32(fmath.MaxFloat32)
-		for op := range nPrev {
-			d := base + (o-op)*step
-			if d < -mdiff || d > mdiff {
-				continue
+		opLo := max(0, o-hiOff)
+		opHi := min(nPrev-1, o-loOff)
+		if opLo <= opHi {
+			// Range over the window rather than indexing dpp by op: the
+			// prover cannot carry op < nPrev through the min(), but it
+			// clears every check on a slice walked by range.
+			w := dpp[opLo : opHi+1]
+			// lamsf index at op is baseIdx + (o-op)*step, so it is first
+			// evaluated at the window's lowest op and moves by -step as op
+			// rises
+			idx := baseIdx + (o-opLo)*step
+			besti := -1
+			for i := range w {
+				c := w[i] + lamsf[idx]
+				if c < bestc {
+					bestc = c
+					besti = i
+				}
+				idx -= step
 			}
-			c := dpp[op] + lamsf[d+mdiff]
-			if c < bestc {
-				bestc = c
-				best = op
+			if besti >= 0 {
+				best = opLo + besti
 			}
 		}
 		if best < 0 {
