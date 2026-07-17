@@ -85,8 +85,26 @@ func QuantizeBands(out []int32, in, scaled []float32, isSigned bool, maxval int,
 	for i := range out {
 		v := min(float32(scaled[i]*q34)+rounding, m)
 		tmp := int32(v)
-		if isSigned && in[i] < 0 {
-			tmp = -tmp
+		// Nested rather than "isSigned && in[i] < 0": the && form's merge block
+		// has three predecessors, and branchelim only rewrites two-predecessor
+		// diamonds, so the inner test stays a branch. Split, it if-converts to
+		// CSNEG on arm64 and MOVL/NEGL/CMOVL on amd64, which spills a register
+		// to do it and still comes out ahead. This works only because tmp is an
+		// integer: branchelim builds a CondSelect for integer and pointer types
+		// alone, so the same shape over a float32, as at quantize.go:199, gains
+		// nothing from nesting.
+		//
+		// It is the loop's only data-dependent branch, but it is not a coin
+		// flip: the rate loop replays these same coefficients once per
+		// scalefactor candidate, so the sign sequence is mostly predicted and
+		// only the residual is on the table. Worth about 2% of a full encode on
+		// x86_64 and under 1% on Cortex-A76, on go1.26.5; hardware and method
+		// are in #14. TestQuantizeBandsMatchesFFMIN pins the equivalence, its
+		// reference deliberately keeping the && form.
+		if isSigned {
+			if in[i] < 0 {
+				tmp = -tmp
+			}
 		}
 		out[i] = tmp
 	}
