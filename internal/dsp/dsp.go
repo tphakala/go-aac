@@ -57,14 +57,33 @@ func AbsPow34(out, in []float32) {
 // exactly as C's two-statement form does; without the explicit conversion Go
 // may fuse mul+add into one FMA on arm64 and flip values that land on the
 // truncation boundary.
+//
+// The clamp is min(), not a transliteration of the C's FFMIN (aacencdsp.c:41),
+// which expands to "a > b ? b : a" (macros.h:49). They are not equivalent in
+// general: min() quiets a signaling NaN, and Go makes min(x, NaN) the NaN and
+// min(+0.0, -0.0) the -0.0, where FFMIN keeps x, x and +0.0. They agree here
+// on two properties this call site guarantees: v is always the output of
+// "+ rounding", so IEEE arithmetic has already quieted any signaling NaN, and
+// m converts from an int (tables.CBMaxval, 0 to 16), so it is never NaN and
+// never -0.0. TestQuantizeBandsMatchesFFMIN pins both, and the FMA guard above
+// with them. Do not copy this to a kernel whose bound can be NaN, or whose
+// input reaches the clamp unquieted.
+//
+// Only out is equivalent, not v: on amd64 min() lowers to MINSS/MINSS/POR, and
+// at maxval 7 the POR leaves a NaN payload arm64's FMINS does not. int32()
+// collapses both, which hides it, so do not lift v out of this function.
+//
+// min() also drops the clamp's branch, which is data dependent because it fires
+// only on the coefficients that saturate: worth 5.5% on Cortex-A76 and 6.7% on
+// x86_64 over a full encode. Hoisting float32(maxval) mirrors clang; hoisting
+// it while keeping the branch measured slower than either form, so the two
+// belong together.
 func QuantizeBands(out []int32, in, scaled []float32, isSigned bool, maxval int, q34, rounding float32) {
 	in = in[:len(out)]
 	scaled = scaled[:len(out)]
+	m := float32(maxval)
 	for i := range out {
-		v := float32(scaled[i]*q34) + rounding
-		if m := float32(maxval); v > m {
-			v = m
-		}
+		v := min(float32(scaled[i]*q34)+rounding, m)
 		tmp := int32(v)
 		if isSigned && in[i] < 0 {
 			tmp = -tmp
