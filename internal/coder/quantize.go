@@ -117,7 +117,7 @@ func clipf(v, lo, hi float32) float32 {
 // is computed into the Coder scratch. resBits/energy receive the exact
 // spectral bit count and quantized energy when non-nil.
 // Mirrors aaccoder.c:quantize_and_encode_band_cost_template @ d09d5afc3a
-// (aaccoder.c:75-200), with the nine QUANTIZE_AND_ENCODE_BAND_COST_FUNC
+// (aaccoder.c:75-193), with the nine QUANTIZE_AND_ENCODE_BAND_COST_FUNC
 // macro specializations folded into one table-driven body per
 // docs/go-design.md.
 // Splitting it would break the line-by-line mapping to the pinned source,
@@ -256,7 +256,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					uint32(tables.SpectralCodes[cb-1][curidx]))
 				if d.unsigned {
 					for j := range 2 {
-						if cv[curidx*2+j] != 0.0 {
+						if vec[j] != 0.0 {
 							var sign uint32
 							if inSeg[j] < 0.0 {
 								sign = 1
@@ -267,7 +267,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 				}
 				if d.escape {
 					for j := range 2 {
-						if cv[curidx*2+j] == 64.0 {
+						if vec[j] == 64.0 {
 							coef := clip(quant(absf(inSeg[j]), q, rounding), 16, (1<<13)-1)
 							length := log2i(coef)
 							pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
@@ -340,7 +340,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 					uint32(tables.SpectralCodes[cb-1][curidx]))
 				if d.unsigned {
 					for j := range 4 {
-						if cv[curidx*4+j] != 0.0 {
+						if vec[j] != 0.0 {
 							var sign uint32
 							if inSeg[j] < 0.0 {
 								sign = 1
