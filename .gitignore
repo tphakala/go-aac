@@ -50,3 +50,9 @@ tools/cnmr/cnmrtrace
 tools/ctns/ctns
 tools/ctwoloop/ctwoloop
 tools/corder/corder
+
+# wav2aac benchmark CLI. `go build ./tools/wav2aac` writes the binary to the
+# CWD, not the package dir, so the repo root needs covering too; a stray 2.9 MB
+# ELF reached main this way once already.
+/wav2aac
+tools/wav2aac/wav2aac
