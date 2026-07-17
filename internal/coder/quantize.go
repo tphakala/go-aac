@@ -169,14 +169,17 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	if !d.unsigned {
 		off = int(tables.CBMaxval[cb])
 	}
+	sb := tables.SpectralBits[cb-1]
+	cv := tables.CodebookVectors[cb-1]
+	rng := int(tables.CBRange[cb])
 	for i := 0; i < size; i += dim {
 		curidx := 0
 		for j := range dim {
-			curidx *= int(tables.CBRange[cb])
+			curidx *= rng
 			curidx += int(c.qcoefs[i+j]) + off
 		}
-		curbits := int(tables.SpectralBits[cb-1][curidx])
-		vec := tables.CodebookVectors[cb-1][curidx*dim:]
+		curbits := int(sb[curidx])
+		vec := cv[curidx*dim:]
 		var rd float32
 		if d.unsigned {
 			for j := range dim {
@@ -230,11 +233,11 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 			return uplim
 		}
 		if pb != nil {
-			pb.Put(int(tables.SpectralBits[cb-1][curidx]),
+			pb.Put(int(sb[curidx]),
 				uint32(tables.SpectralCodes[cb-1][curidx]))
 			if d.unsigned {
 				for j := range dim {
-					if tables.CodebookVectors[cb-1][curidx*dim+j] != 0.0 {
+					if cv[curidx*dim+j] != 0.0 {
 						var sign uint32
 						if in[i+j] < 0.0 {
 							sign = 1
@@ -245,7 +248,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 			}
 			if d.escape {
 				for j := range 2 {
-					if tables.CodebookVectors[cb-1][curidx*2+j] == 64.0 {
+					if cv[curidx*2+j] == 64.0 {
 						coef := clip(quant(absf(in[i+j]), q, rounding), 16, (1<<13)-1)
 						length := log2i(coef)
 						pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
