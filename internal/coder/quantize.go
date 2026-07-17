@@ -188,7 +188,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 						curbits += 21
 					} else {
 						cq := clip(quant(t, q, rounding), 0, (1<<13)-1)
-						quantized = float32(float32(cq) * fmath.Cbrt32(float32(cq)) * iq)
+						quantized = float32(tables.Pow43[cq] * iq)
 						curbits += log2i(cq)*2 - 4 + 1
 					}
 				} else {
