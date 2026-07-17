@@ -114,7 +114,7 @@ func ceilDiv(a, b int) int {
 // LOWEST op.
 //
 // The C tests |d| <= mdiff once per iteration. d is affine in op and falls by
-// step as op rises, so the surviving op form one contiguous range whose
+// step as op rises, so the surviving op values form one contiguous range whose
 // offsets from o are computable once per call. Iterating exactly that range
 // visits the same pairs in the same increasing order, so every float op and
 // the tie-break are unchanged; TestNMRTrellisStepMatchesReference pins the

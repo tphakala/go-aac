@@ -45,11 +45,13 @@ func nmrTrellisStepRef(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 // C. The sweep is a cross product of sampled shapes, not an exhaustive proof:
 // it is dense in base, the axis the bounds derivation turns on, and sampled in
 // step, nCur, nPrev and mdiff; the step list covers both signs, zero, and
-// values where the floor/ceil rounding bites. The optimisation only reshapes which op are
-// visited, so the cases that matter are the window edges (base beyond
-// +/-mdiff, so the range clips or empties), step > 1 (where the floor/ceil
-// rounding of the bounds is load-bearing), and ties in c (where the strict
-// < tie-break has to keep picking the lowest op).
+// values where the floor/ceil rounding bites.
+//
+// The optimisation only reshapes which op values are visited, so the cases
+// that matter are the window edges (base beyond +/-mdiff, so the range clips
+// or empties), step > 1 (where the floor/ceil rounding of the bounds is
+// load-bearing), and ties in c (where the strict < tie-break has to keep
+// picking the lowest op).
 func TestNMRTrellisStepMatchesReference(t *testing.T) {
 	const maxN = NMRNCand
 	rng := rand.New(rand.NewSource(1))
