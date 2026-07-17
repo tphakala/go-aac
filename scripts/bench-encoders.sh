@@ -71,8 +71,20 @@ go build -o "$work/wav2aac" "$repo_root/tools/wav2aac"
 
 cat "$input" >/dev/null # warm the page cache
 
-# Duration in seconds, for the realtime multiple. 44-byte canonical header.
-dur=$(awk "BEGIN{printf \"%.4f\", ($insz-44)/(48000*2)}")
+# Duration in seconds, for the realtime multiple. Ask ffmpeg rather than
+# assuming 48 kHz mono 16-bit: this script accepts any WAV, and a hardcoded
+# stride silently reports the wrong realtime figure for stereo, 44.1 kHz or
+# 32-bit input, which is the one number the whole script exists to produce.
+# `ffmpeg -i` with no output file always exits nonzero ("At least one output
+# file must be specified"), which under set -e plus pipefail would kill the
+# script on this assignment even though the parse succeeded.
+dur=$({ "$ff" -hide_banner -i "$input" 2>&1 || true; } |
+  awk -F'[:,]' '/Duration:/ {print ($2*3600)+($3*60)+$4; exit}')
+case "$dur" in
+  ''|*[!0-9.]*) echo "could not determine duration of $input"; exit 1 ;;
+esac
+awk "BEGIN{exit !($dur > 0)}" || { echo "input $input has zero duration"; exit 1; }
+echo "duration: ${dur}s"
 
 # bench NAME OUTFILE -- CMD...   (the output path is explicit; the input is read-only)
 bench() {
@@ -87,21 +99,34 @@ bench() {
     printf '%-16s wall=%ss cpu=%ss %%cpu=%s rss=%sKB realtime=%s out=%s\n' \
       "$name" "$e" "$cpu" "$p" "$m" "$rt" "$osz"
   else
-    printf '%-16s FAILED (see output below)\n' "$name"; cat "$work/log"
+    printf '%-16s FAILED (see output below)\n' "$name"
+    cat "$work/log"
+    return 1
   fi
 }
+
+# Track whether any measurement failed, so the script cannot exit green after
+# printing FAILED. set -e does not catch bench because it runs in an if/||
+# context below.
+failed=0
 
 for coder in nmr twoloop fast; do
   echo "=== encode, ${kbps} kbps, coder=${coder}, single-threaded ==="
   bench "go-aac/$coder" "$work/o_go_$coder.aac" -- \
-    "$work/wav2aac" -b "$bitrate" -coder "$coder" "$input" "$work/o_go_$coder.aac"
+    "$work/wav2aac" -b "$bitrate" -coder "$coder" "$input" "$work/o_go_$coder.aac" || failed=1
   bench "ffmpeg/$coder" "$work/o_ff_$coder.aac" -- \
     "$ff" -hide_banner -loglevel error -y -threads 1 -i "$input" \
     -c:a aac -aac_coder "$coder" -b:a "$bitrate" -threads 1 \
-    -f adts "$work/o_ff_$coder.aac"
+    -f adts "$work/o_ff_$coder.aac" || failed=1
 done
 
 echo
 echo "note: go-aac and FFmpeg are not byte-identical end to end (the port is"
 echo "validated per subsystem and on decoded quality, not on the whole stream),"
 echo "so compare sizes for parity, not equality."
+
+if [ "$failed" -ne 0 ]; then
+  echo
+  echo "one or more measurements FAILED; the numbers above are incomplete"
+  exit 1
+fi

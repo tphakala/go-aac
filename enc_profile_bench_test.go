@@ -3,6 +3,7 @@ package aac
 
 import (
 	"encoding/binary"
+	"math"
 	"os"
 	"testing"
 )
@@ -20,7 +21,7 @@ func benchPlanar(tb testing.TB) (frames [][]float32, rate, channels int) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	if len(raw) < 44 || string(raw[0:4]) != "RIFF" {
+	if len(raw) < 44 || string(raw[0:4]) != "RIFF" || string(raw[8:12]) != "WAVE" {
 		tb.Fatalf("%s: not a RIFF/WAVE file", p)
 	}
 	var data []byte
@@ -28,13 +29,31 @@ func benchPlanar(tb testing.TB) (frames [][]float32, rate, channels int) {
 	off := 12
 	for off+8 <= len(raw) {
 		id := string(raw[off : off+4])
-		sz := int(binary.LittleEndian.Uint32(raw[off+4 : off+8]))
+		// A size with the high bit set casts to a negative int on a 32-bit
+		// build, slipping past the bound check below and panicking the reslice.
+		szU := binary.LittleEndian.Uint32(raw[off+4 : off+8])
+		if szU > math.MaxInt32 {
+			tb.Fatalf("%s: corrupt chunk %q size %d", p, id, szU)
+		}
+		sz := int(szU)
 		if off+8+sz > len(raw) {
 			sz = len(raw) - off - 8
 		}
 		body := raw[off+8 : off+8+sz]
 		switch id {
 		case "fmt ":
+			if len(body) < 16 {
+				tb.Fatalf("%s: short fmt chunk: %d bytes", p, len(body))
+			}
+			switch f := binary.LittleEndian.Uint16(body[0:2]); f {
+			case 1:
+			case 0xFFFE:
+				if len(body) < 40 || binary.LittleEndian.Uint16(body[24:26]) != 1 {
+					tb.Fatalf("%s: extensible wav is not PCM subformat", p)
+				}
+			default:
+				tb.Fatalf("%s: unsupported wav format %d", p, f)
+			}
 			channels = int(binary.LittleEndian.Uint16(body[2:4]))
 			rate = int(binary.LittleEndian.Uint32(body[4:8]))
 			bits = int(binary.LittleEndian.Uint16(body[14:16]))
@@ -42,6 +61,16 @@ func benchPlanar(tb testing.TB) (frames [][]float32, rate, channels int) {
 			data = body
 		}
 		off += 8 + sz + sz&1
+	}
+	// Guard the divisor: bits < 8 or channels 0 would make the stride zero.
+	if bits != 16 && bits != 32 {
+		tb.Fatalf("%s: unsupported bit depth %d (must be 16 or 32)", p, bits)
+	}
+	if channels < 1 || channels > 2 {
+		tb.Fatalf("%s: unsupported channel count %d", p, channels)
+	}
+	if rate <= 0 {
+		tb.Fatalf("%s: invalid sample rate %d", p, rate)
 	}
 	n := len(data) / (channels * bits / 8)
 	frames = make([][]float32, channels)

@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 package coder
 
-import (
-	"testing"
-
-	"github.com/tphakala/go-aac/internal/fmath"
-)
+import "testing"
 
 // BenchmarkNMRTrellisStepShapes measures nmrTrellisStep at the shapes the real
 // encode drives it with. Two leaf attributions in the full-encode profile have
@@ -42,5 +38,4 @@ func BenchmarkNMRTrellisStepShapes(b *testing.B) {
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/call")
 		})
 	}
-	_ = fmath.MaxFloat32
 }

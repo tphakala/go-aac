@@ -4,6 +4,7 @@ package pcm
 import (
 	"encoding/binary"
 	"io"
+	"math"
 	"os"
 	"testing"
 )
@@ -22,13 +23,22 @@ func wavPCMTB(tb testing.TB, path string) (data []byte, rate, channels, bits int
 	off := 12
 	for off+8 <= len(raw) {
 		id := string(raw[off : off+4])
-		sz := int(binary.LittleEndian.Uint32(raw[off+4 : off+8]))
+		// A size with the high bit set casts to a negative int on a 32-bit
+		// build, slipping past the bound check below and panicking the reslice.
+		szU := binary.LittleEndian.Uint32(raw[off+4 : off+8])
+		if szU > math.MaxInt32 {
+			tb.Fatalf("%s: corrupt chunk %q size %d", path, id, szU)
+		}
+		sz := int(szU)
 		if off+8+sz > len(raw) {
 			sz = len(raw) - off - 8
 		}
 		body := raw[off+8 : off+8+sz]
 		switch id {
 		case "fmt ":
+			if len(body) < 16 {
+				tb.Fatalf("%s: short fmt chunk: %d bytes", path, len(body))
+			}
 			switch f := binary.LittleEndian.Uint16(body[0:2]); f {
 			case 1:
 			case 0xFFFE:

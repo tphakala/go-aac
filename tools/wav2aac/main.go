@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	aac "github.com/tphakala/go-aac"
@@ -57,9 +58,17 @@ func run(inPath, outPath string, bitrate int, coderName string) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	rate, channels, bits, err := readWAVHeader(in)
+	rate, channels, bits, dataLen, err := readWAVHeader(in)
 	if err != nil {
 		return err
+	}
+	// convertFrame handles only these depths, and stride would be zero below
+	// for anything under 8 bits, so reject it here with a clean error.
+	if bits != 16 && bits != 32 {
+		return fmt.Errorf("unsupported bit depth %d (must be 16 or 32)", bits)
+	}
+	if channels < 1 || channels > 2 {
+		return fmt.Errorf("unsupported channel count %d (must be 1 or 2)", channels)
 	}
 
 	e, err := aac.NewEncoder(aac.EncoderConfig{
@@ -83,7 +92,9 @@ func run(inPath, outPath string, bitrate int, coderName string) error {
 	// float32. Peak RSS is part of what the benchmark reports, and holding the
 	// entire decoded input would measure this tool's buffering rather than the
 	// encoder's footprint.
-	r := bufio.NewReaderSize(in, 1<<16)
+	// Limit to the declared data chunk: trailing LIST/id3 chunks after data
+	// would otherwise be read as audio samples.
+	r := bufio.NewReaderSize(io.LimitReader(in, dataLen), 1<<16)
 	stride := channels * bits / 8
 	chunk := make([]byte, aac.FrameSize*stride)
 	planar := make([][]float32, channels)
@@ -181,49 +192,63 @@ func convertFrame(planar [][]float32, data []byte, samples, channels, bits int) 
 }
 
 // readWAVHeader parses chunk headers until it reaches the data chunk, leaving
-// r positioned at the first sample. Accepts plain PCM and WAVE_FORMAT_EXTENSIBLE
-// with the PCM subformat.
-func readWAVHeader(r io.Reader) (rate, channels, bits int, err error) {
+// r positioned at the first sample and returning the declared data length.
+// Accepts plain PCM and WAVE_FORMAT_EXTENSIBLE with the PCM subformat.
+func readWAVHeader(r io.Reader) (rate, channels, bits int, dataLen int64, err error) {
 	var riff [12]byte
 	if _, err := io.ReadFull(r, riff[:]); err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	if string(riff[0:4]) != "RIFF" || string(riff[8:12]) != "WAVE" {
-		return 0, 0, 0, fmt.Errorf("not a RIFF/WAVE file")
+		return 0, 0, 0, 0, fmt.Errorf("not a RIFF/WAVE file")
 	}
 	for {
 		var ch [8]byte
 		if _, err := io.ReadFull(r, ch[:]); err != nil {
-			return 0, 0, 0, fmt.Errorf("no data chunk: %w", err)
+			return 0, 0, 0, 0, fmt.Errorf("no data chunk: %w", err)
 		}
 		id := string(ch[0:4])
-		sz := int(binary.LittleEndian.Uint32(ch[4:8]))
+		// A chunk size with the high bit set would become negative when cast to
+		// int on a 32-bit build (GOARCH=386/arm), turning the make and the
+		// ReadFull below into a panic rather than an error.
+		szU := binary.LittleEndian.Uint32(ch[4:8])
+		if szU > math.MaxInt32 {
+			return 0, 0, 0, 0, fmt.Errorf("corrupt chunk %q size %d", id, szU)
+		}
+		sz := int(szU)
 		if id == "data" {
 			if rate == 0 || channels == 0 || bits == 0 {
-				return 0, 0, 0, fmt.Errorf("data chunk precedes fmt chunk")
+				return 0, 0, 0, 0, fmt.Errorf("data chunk precedes fmt chunk")
 			}
-			return rate, channels, bits, nil
+			return rate, channels, bits, int64(sz), nil
 		}
-		body := make([]byte, sz+sz&1)
+		padded := int64(sz + sz&1)
+		if id != "fmt " {
+			// Discard rather than buffer: a large LIST/JUNK chunk would
+			// otherwise inflate the peak RSS this tool exists to report.
+			if _, err := io.CopyN(io.Discard, r, padded); err != nil {
+				return 0, 0, 0, 0, err
+			}
+			continue
+		}
+		body := make([]byte, padded)
 		if _, err := io.ReadFull(r, body); err != nil {
-			return 0, 0, 0, err
+			return 0, 0, 0, 0, err
 		}
-		if id == "fmt " {
-			if sz < 16 {
-				return 0, 0, 0, fmt.Errorf("short fmt chunk")
-			}
-			switch f := binary.LittleEndian.Uint16(body[0:2]); f {
-			case 1:
-			case 0xFFFE:
-				if sz < 40 || binary.LittleEndian.Uint16(body[24:26]) != 1 {
-					return 0, 0, 0, fmt.Errorf("extensible wav is not PCM subformat")
-				}
-			default:
-				return 0, 0, 0, fmt.Errorf("unsupported wav format %d", f)
-			}
-			channels = int(binary.LittleEndian.Uint16(body[2:4]))
-			rate = int(binary.LittleEndian.Uint32(body[4:8]))
-			bits = int(binary.LittleEndian.Uint16(body[14:16]))
+		if sz < 16 {
+			return 0, 0, 0, 0, fmt.Errorf("short fmt chunk: %d bytes", sz)
 		}
+		switch f := binary.LittleEndian.Uint16(body[0:2]); f {
+		case 1:
+		case 0xFFFE:
+			if sz < 40 || binary.LittleEndian.Uint16(body[24:26]) != 1 {
+				return 0, 0, 0, 0, fmt.Errorf("extensible wav is not PCM subformat")
+			}
+		default:
+			return 0, 0, 0, 0, fmt.Errorf("unsupported wav format %d", f)
+		}
+		channels = int(binary.LittleEndian.Uint16(body[2:4]))
+		rate = int(binary.LittleEndian.Uint32(body[4:8]))
+		bits = int(binary.LittleEndian.Uint16(body[14:16]))
 	}
 }
