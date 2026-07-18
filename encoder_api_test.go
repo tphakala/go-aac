@@ -88,15 +88,10 @@ func TestEncodeFrameInvalidAudio(t *testing.T) {
 	if _, err := e.EncodeFrame(nil, [][]float32{frame}); err != nil { // priming
 		t.Fatal(err)
 	}
-	// The encoder buffers one frame of lookahead, so a NaN surfaces when
-	// the window containing it is transformed: on a subsequent call.
+	// Samples are checked at ingest, so the NaN is rejected on the same
+	// call that carries it.
 	frame[100] = float32(math.NaN())
-	var got error
-	for range 3 {
-		if _, got = e.EncodeFrame(nil, [][]float32{frame}); got != nil {
-			break
-		}
-	}
+	_, got := e.EncodeFrame(nil, [][]float32{frame})
 	if !errors.Is(got, ErrInvalidAudio) {
 		t.Fatalf("NaN input: %v, want ErrInvalidAudio", got)
 	}

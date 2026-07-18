@@ -274,6 +274,21 @@ func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 		if len(samples[0]) > frameSize {
 			return dst, fmt.Errorf("enc: frame of %d samples exceeds %d", len(samples[0]), frameSize)
 		}
+		// Reject non-finite input at ingest, before any sample can reach a
+		// downstream int(float) conversion. int32(NaN) is 0 on arm64 and
+		// -2^31 on amd64, so a NaN reaching the quantizer would make the
+		// emitted bytes GOARCH-dependent. A NaN in the lookahead region taints
+		// the current frame's psy analysis one frame before the post-MDCT
+		// guard (below) fires, so that guard alone cannot close this hole. The
+		// !(|v| <= FLT_MAX) form is true for NaN and for +/-Inf; it matches
+		// the documented ErrInvalidAudio contract.
+		for ch := range samples {
+			for _, v := range samples[ch] {
+				if !(absf(v) <= fmath.MaxFloat32) {
+					return dst, ErrInvalidAudio
+				}
+			}
+		}
 		e.remainingSamples += len(samples[0])
 	} else if e.remainingSamples <= 0 {
 		return dst, nil // drained (mirrors the afq empty check, aacenc.c:1031)
