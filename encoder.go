@@ -203,11 +203,10 @@ func (e *Encoder) Reset(cfg EncoderConfig) error {
 //	}
 //
 // Input containing NaN or Inf returns an error satisfying
-// errors.Is(err, ErrInvalidAudio) and appends nothing. Because the
-// encoder buffers one frame of lookahead, the error can surface on the
-// call after the one that carried the bad samples (the guard sits on the
-// transformed spectrum, exactly like the C encoder's). After
-// ErrInvalidAudio the stream is unusable; Reset the encoder.
+// errors.Is(err, ErrInvalidAudio) and appends nothing. The samples are
+// checked at ingest, so the error surfaces on the same call that carried
+// the bad samples. After ErrInvalidAudio the stream is unusable; Reset the
+// encoder.
 func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 	if e.enc == nil {
 		return dst, ErrEncoderClosed // zero value or a failed Reset

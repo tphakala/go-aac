@@ -60,11 +60,13 @@ func TestNaNInputRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame := testFrame()
-	frame[100] = float32(math.NaN())
-	if _, err = e.EncodeFrame(nil, [][]float32{frame}); err != nil {
+	if _, err = e.EncodeFrame(nil, [][]float32{testFrame()}); err != nil { // clean priming frame
 		t.Fatalf("priming frame should not encode: %v", err)
 	}
+	// The ingest guard rejects non-finite input on the carrying frame, so the
+	// NaN surfaces here rather than one frame later at the post-MDCT guard.
+	frame := testFrame()
+	frame[100] = float32(math.NaN())
 	if _, err = e.EncodeFrame(nil, [][]float32{frame}); err == nil {
 		t.Fatal("NaN input not rejected")
 	}
