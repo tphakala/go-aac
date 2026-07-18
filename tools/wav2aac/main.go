@@ -6,9 +6,13 @@
 // than timing a Go benchmark against a C program and hoping the difference is
 // only the codec.
 //
-// It drives the low-level aac package rather than the pcm streaming layer,
-// because pcm.Config exposes no coder selection and the benchmark needs to
-// compare every coder against its FFmpeg counterpart.
+// It drives the low-level aac package directly, calling EncodeFrame and
+// writing each access unit itself, instead of going through the pcm
+// streaming layer. That keeps the wall time, CPU time and peak RSS this
+// benchmark reports attributable to the encoder alone, not to any layer
+// built on top of it. pcm.Config exposes Coder selection too now, so that
+// is no longer a reason to bypass it; the low-level path stays for the
+// measurement isolation described above.
 //
 // Usage: wav2aac [-b bitrate] [-coder nmr|twoloop|fast] in.wav out.aac
 package main
