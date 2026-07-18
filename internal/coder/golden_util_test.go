@@ -52,6 +52,29 @@ func loadU8(t *testing.T, name string) []byte {
 	return b
 }
 
+// quantizeSearchAmps is the per-codebook amplitude scale used by
+// quantizeSearchCoeffs to synthesize deterministic quantizer test
+// coefficients, indexed by codebook number (1 to 11; index 0 is unused).
+var quantizeSearchAmps = [12]float32{0, 1.5, 1.5, 2.5, 2.5, 4.5, 4.5, 7.5, 7.5, 12.5, 12.5, 500.0}
+
+// quantizeSearchCoeffs generates size deterministic pseudo-random
+// coefficients for codebook cb, scaled by quantizeSearchAmps[cb]. It advances
+// *state with the same linear congruential recurrence
+// (state = state*1664525 + 1013904223) used by the C oracle fixture
+// generator in tools/cquant, so callers seeding state at 0x1f2e3d4c and
+// threading it across calls reproduce the oracle's coefficient stream
+// bit-for-bit. TestQuantizeAndEncodeBandMatchesC depends on this: it threads
+// one state across all 11 codebooks in order, so the sequence must stay
+// exactly as written here.
+func quantizeSearchCoeffs(state *uint32, cb, size int) []float32 {
+	out := make([]float32, size)
+	for i := range out {
+		*state = *state*1664525 + 1013904223
+		out[i] = quantizeSearchAmps[cb] * float32(int32(*state)) / 2147483648.0
+	}
+	return out
+}
+
 // tonalWindowedCoeffs recomputes the fixture's MDCT input in Go: samples
 // [2048, 4096) of the gate signal, KBD long window on both halves, MDCT
 // scale 32768.
