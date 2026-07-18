@@ -12,16 +12,11 @@ import (
 
 func TestQuantizeAndEncodeBandMatchesC(t *testing.T) {
 	raw := loadU8(t, "qeb_bytes.bin")
-	amps := [12]float32{0, 1.5, 1.5, 2.5, 2.5, 4.5, 4.5, 7.5, 7.5, 12.5, 12.5, 500.0}
 	state := uint32(0x1f2e3d4c)
 	var c Coder
 	off := 0
 	for cb := 1; cb <= 11; cb++ {
-		in := make([]float32, 32)
-		for i := range in {
-			state = state*1664525 + 1013904223
-			in[i] = amps[cb] * float32(int32(state)) / 2147483648.0
-		}
+		in := quantizeSearchCoeffs(&state, cb, 32)
 		nbits := int32(binary.LittleEndian.Uint32(raw[off:]))
 		nbytes := int32(binary.LittleEndian.Uint32(raw[off+4:]))
 		want := raw[off+8 : off+8+int(nbytes)]
