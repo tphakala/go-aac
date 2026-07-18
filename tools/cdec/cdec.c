@@ -186,8 +186,12 @@ int main(int argc, char **argv)
                 return 2;
             }
         }
-        avctx->extradata = av_mallocz(alen + AV_INPUT_BUFFER_PADDING_SIZE);
-        memcpy(avctx->extradata, asc, alen);
+        avctx->extradata = av_mallocz((size_t)alen + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!avctx->extradata) {
+            fprintf(stderr, "extradata alloc failed\n");
+            return 1;
+        }
+        memcpy(avctx->extradata, asc, (size_t)alen);
         avctx->extradata_size = alen;
     }
     if (avcodec_open2(avctx, codec, NULL) < 0) {
