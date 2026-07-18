@@ -134,3 +134,72 @@ func TestVectorFMulReverse(t *testing.T) {
 		}
 	}
 }
+
+// didPanic reports whether fn panicked.
+func didPanic(fn func()) (panicked bool) {
+	defer func() {
+		if recover() != nil {
+			panicked = true
+		}
+	}()
+	fn()
+	return false
+}
+
+// TestKernelLengthContract pins the destination-length contract for all four
+// kernels. A source shorter than the destination is a caller bug and must panic
+// even when the source has spare capacity, which is the exact silent-corruption
+// case: the internal re-slice checks capacity, not length, so without the
+// precondition a short source with cap >= len(dst) would be extended and the
+// loop would read stale data. Equal lengths must not panic, and an empty
+// destination is a no-op.
+func TestKernelLengthContract(t *testing.T) {
+	// call runs the kernel with a destination of length dstLen and sources of
+	// length srcLen. Sources are allocated with capacity dstLen, so a source
+	// shorter than the destination (srcLen < dstLen) still has cap >= len(dst):
+	// a missing length check would read past srcLen rather than fail on capacity.
+	cases := []struct {
+		name string
+		call func(dstLen, srcLen int)
+	}{
+		{"VectorFMul", func(dstLen, srcLen int) {
+			dst := make([]float32, dstLen)
+			src0 := make([]float32, dstLen)[:srcLen]
+			src1 := make([]float32, dstLen)[:srcLen]
+			VectorFMul(dst, src0, src1)
+		}},
+		{"VectorFMulReverse", func(dstLen, srcLen int) {
+			dst := make([]float32, dstLen)
+			src0 := make([]float32, dstLen)[:srcLen]
+			src1 := make([]float32, dstLen)[:srcLen]
+			VectorFMulReverse(dst, src0, src1)
+		}},
+		{"AbsPow34", func(dstLen, srcLen int) {
+			out := make([]float32, dstLen)
+			in := make([]float32, dstLen)[:srcLen]
+			AbsPow34(out, in)
+		}},
+		{"QuantizeBands", func(dstLen, srcLen int) {
+			out := make([]int32, dstLen)
+			in := make([]float32, dstLen)[:srcLen]
+			scaled := make([]float32, dstLen)[:srcLen]
+			QuantizeBands(out, in, scaled, true, 3, 1, 0.4054)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Short source (len 4) with spare capacity (cap 8) into dst len 8.
+			if !didPanic(func() { tc.call(8, 4) }) {
+				t.Errorf("short source (len 4, cap 8) into dst len 8 did not panic")
+			}
+			// Equal lengths must not panic.
+			if didPanic(func() { tc.call(4, 4) }) {
+				t.Errorf("equal lengths panicked")
+			}
+			// Empty destination is a no-op.
+			if didPanic(func() { tc.call(0, 0) }) {
+				t.Errorf("empty destination panicked")
+			}
+		})
+	}
+}

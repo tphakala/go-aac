@@ -5,20 +5,32 @@ package dsp
 
 import "github.com/tphakala/go-aac/internal/fmath"
 
-// The kernels below re-slice their inputs to the loop length up front. That is
-// load-bearing, not cosmetic: it is the form the compiler can prove, so the
-// per-element bounds checks leave the loop body, and a caller passing a short
-// slice fails at once instead of after a partial write. Verified on go1.25
-// arm64 with -gcflags=-d=ssa/check_bce/debug=1: VectorFMul carried two bounds
-// checks per element and AbsPow34 one; after the re-slice the loops carry none
-// and only a single check per call remains. Measured (min of 10, n=1024):
+// Length contract: every kernel here is destination-governed. The destination
+// slice (dst or out) fixes the element count, matching Go's copy convention and
+// the three-of-four majority these kernels already followed. Each source must
+// be at least as long as the destination. A shorter source is a caller bug, so
+// every kernel checks its sources up front and panics rather than reading past
+// their length. Without that check the re-slice below validates capacity, not
+// length, so a short source with spare capacity would be silently extended and
+// the loop would read stale data past the source's end.
+//
+// After the check the kernels re-slice their sources to the destination length.
+// That re-slice is load-bearing, not cosmetic: it is the form the compiler can
+// prove, so the per-element bounds checks leave the loop body. Verified on
+// go1.25 arm64 with -gcflags=-d=ssa/check_bce/debug=1: VectorFMul carried two
+// bounds checks per element and AbsPow34 one; after the re-slice the loops carry
+// none and only a single check per call remains. Measured (min of 10, n=1024):
 // AbsPow34 346.8 -> 242.8 ns/op, VectorFMul 269.1 -> 240.9 ns/op. Hoisting a
 // bare `_ = src0[len(dst)-1]` instead does not work: it removes none of the
-// in-loop checks and adds one of its own.
+// in-loop checks, adds one of its own, and panics wrongly when the destination
+// is empty.
 
 // VectorFMul computes dst[i] = src0[i] * src1[i].
 // Mirrors AVFloatDSPContext.vector_fmul (libavutil/float_dsp.c @ d09d5afc3a).
 func VectorFMul(dst, src0, src1 []float32) {
+	if len(src0) < len(dst) || len(src1) < len(dst) {
+		panic("dsp: VectorFMul: source shorter than dst")
+	}
 	src0 = src0[:len(dst)]
 	src1 = src1[:len(dst)]
 	for i := range dst {
@@ -29,6 +41,9 @@ func VectorFMul(dst, src0, src1 []float32) {
 // VectorFMulReverse computes dst[i] = src0[i] * src1[len-1-i].
 // Mirrors AVFloatDSPContext.vector_fmul_reverse.
 func VectorFMulReverse(dst, src0, src1 []float32) {
+	if len(src0) < len(dst) || len(src1) < len(dst) {
+		panic("dsp: VectorFMulReverse: source shorter than dst")
+	}
 	n := len(dst)
 	src0 = src0[:n]
 	src1 = src1[:n]
@@ -40,9 +55,12 @@ func VectorFMulReverse(dst, src0, src1 []float32) {
 // AbsPow34 computes out[i] = |in[i]|^(3/4) via nested square roots.
 // Mirrors libavcodec/aacencdsp.c:abs_pow34_v @ d09d5afc3a.
 func AbsPow34(out, in []float32) {
-	out = out[:len(in)]
-	for i, v := range in {
-		a := v
+	if len(in) < len(out) {
+		panic("dsp: AbsPow34: source shorter than out")
+	}
+	in = in[:len(out)]
+	for i := range out {
+		a := in[i]
 		if a < 0 {
 			a = -a
 		}
@@ -79,6 +97,9 @@ func AbsPow34(out, in []float32) {
 // it while keeping the branch measured slower than either form, so the two
 // belong together.
 func QuantizeBands(out []int32, in, scaled []float32, isSigned bool, maxval int, q34, rounding float32) {
+	if len(in) < len(out) || len(scaled) < len(out) {
+		panic("dsp: QuantizeBands: source shorter than out")
+	}
 	in = in[:len(out)]
 	scaled = scaled[:len(out)]
 	m := float32(maxval)
