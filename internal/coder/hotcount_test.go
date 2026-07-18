@@ -25,15 +25,17 @@ func BenchmarkNMRTrellisStepShapes(b *testing.B) {
 	for _, shape := range []struct {
 		name             string
 		nCur, nPrev, stp int
+		base             int
 	}{
-		{"96x96_step1", NMRNCand, NMRNCand, 1},
-		{"96x96_step2", NMRNCand, NMRNCand, 2},
-		{"16x16_step1", 16, 16, 1},
+		{"96x96_step1", NMRNCand, NMRNCand, 1, 0},
+		{"96x96_step8", NMRNCand, NMRNCand, 8, 0},
+		{"96x96_step8_base45", NMRNCand, NMRNCand, 8, 45},
+		{"16x16_step1", 16, 16, 1, 0},
 	} {
 		b.Run(shape.name, func(b *testing.B) {
 			for b.Loop() {
 				nmrTrellisStep(dp, bp, dpp, node, lamsf,
-					shape.nCur, shape.nPrev, 0, shape.stp, mdiff)
+					shape.nCur, shape.nPrev, shape.base, shape.stp, mdiff)
 			}
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N), "ns/call")
 		})
