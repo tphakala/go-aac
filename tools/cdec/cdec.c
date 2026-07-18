@@ -220,7 +220,13 @@ int main(int argc, char **argv)
             if (pos + 2 > size) break;
             flen = (size_t)data[pos] << 8 | data[pos + 1];
             pos += 2;
-            if (pos + flen > size) break;
+            /* A zero length is not valid framing for this length-prefixed
+             * format. Without this guard the empty frame is still submitted:
+             * avcodec_send_packet rejects it with EINVAL, and pos advances by
+             * only the 2 length-prefix bytes, so the loop grinds through the
+             * rest of the file emitting one bogus error per 2 bytes. Treat a
+             * zero length as corrupt framing and stop. */
+            if (flen == 0 || pos + flen > size) break;
         } else {
             if (pos + AV_AAC_ADTS_HEADER_SIZE > size) break;
             uint8_t hdrbuf[AV_AAC_ADTS_HEADER_SIZE + AV_INPUT_BUFFER_PADDING_SIZE] = {0};
@@ -234,7 +240,10 @@ int main(int argc, char **argv)
                     hdr.num_aac_frames, hdr.sampling_index, hdr.sample_rate,
                     hdr.frame_length);
             flen = hdr.frame_length;
-            if (pos + flen > size) break;
+            /* ff_adts_header_parse rejects short frames and a parse
+             * failure resyncs above, so flen should never be zero here.
+             * Guard anyway to keep both modes symmetric. */
+            if (flen == 0 || pos + flen > size) break;
         }
         fprintf(g_out, "FRAME %d\n", fidx);
         av_packet_unref(pkt);
