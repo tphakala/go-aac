@@ -13,6 +13,23 @@ import (
 // Encoder.EncodeFrame call and covered by one AAC access unit.
 const FrameSize = 1024
 
+// EncoderDelay is the encoder priming delay: the number of leading samples,
+// per channel and at the output sample rate, that the decoded output carries
+// ahead of the first input sample. A muxer must trim exactly this many leading
+// samples from the decoded audio to reproduce the source gaplessly. For an MP4
+// edit list whose media timescale is the sample rate (the usual audio
+// convention) set the entry's media_time to EncoderDelay; with a different
+// timescale scale it accordingly, since media_time is in timescale units while
+// EncoderDelay is in samples. For an iTunSMPB tag the priming (encoder delay)
+// field is EncoderDelay, always in samples.
+//
+// The delay is structurally one full frame, because the encoder buffers the
+// first frame before emitting any access unit (see EncodeFrame). It is a
+// property of go-aac's AAC-LC encoding path, not of AudioSpecificConfig, and it
+// describes only the samples this encoder prepends; it makes no claim about any
+// additional latency a particular decoder may add to its own output.
+const EncoderDelay = FrameSize
+
 // defaultBitrate is the target selected by EncoderConfig.Bitrate == 0.
 // Mirrors AV_CODEC_DEFAULT_BITRATE, the bit_rate FFmpeg's encoder receives
 // when the caller sets none (libavcodec/options_table.h:47 @ d09d5afc3a):
@@ -195,8 +212,10 @@ func (e *Encoder) Reset(cfg EncoderConfig) error {
 // callers.
 //
 // The encoder delays output by one frame (encoder priming): the first call
-// appends nothing. Pass nil samples to drain; each nil call appends one
-// remaining access unit until Drained reports true:
+// appends nothing. This shifts the decoded output later by EncoderDelay samples
+// per channel, which a muxer trims (see EncoderDelay). Pass nil samples to
+// drain; each nil call appends one remaining access unit until Drained reports
+// true:
 //
 //	for !e.Drained() {
 //	    dst, err = e.EncodeFrame(dst, nil)
@@ -251,6 +270,17 @@ func (e *Encoder) Drained() bool {
 	}
 	return e.enc.Drained()
 }
+
+// Delay reports this stream's encoder priming delay in samples per channel:
+// the number of leading samples a muxer must trim from the decoded output. It
+// feeds an MP4 edit list media_time (scaled to the track timescale, which for
+// audio is usually the sample rate) or an iTunSMPB priming field, in samples.
+// It always equals
+// EncoderDelay for the current encoder, and is exposed as a method so a muxer
+// holding an *Encoder can read the delay from the encoder itself. Should a
+// future configuration ever make the delay depend on the stream, this accessor
+// would keep reporting the correct value without any API change.
+func (e *Encoder) Delay() int { return EncoderDelay }
 
 // AudioSpecificConfig returns the MPEG-4 AudioSpecificConfig for this
 // stream (2 bytes for AAC-LC), as carried in an MP4 esds box; raw-access-
