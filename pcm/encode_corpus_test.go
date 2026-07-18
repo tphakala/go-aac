@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	aac "github.com/tphakala/go-aac"
 )
 
 // ffmpegBin returns the pinned FFmpeg CLI from GOAAC_FFMPEG, skipping the
@@ -166,8 +168,9 @@ func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
 }
 
 // psnr computes 10*log10(1/MSE) against full scale 1.0 between src and
-// dec[delay:]. delay drops the 1024-sample encoder priming (the gapless
-// caveat: ADTS cannot signal encoder delay, so decoders emit the priming).
+// dec[delay:]. delay drops the encoder priming (aac.EncoderDelay samples).
+// The gapless caveat: ADTS cannot signal encoder delay, so decoders emit the
+// priming.
 func psnr(src, dec []float32, delay int) float64 {
 	if len(dec) < delay+len(src) {
 		// Truncated decode: fail any PSNR floor rather than score a prefix as
@@ -259,10 +262,10 @@ func TestBirdNETGoIntegration(t *testing.T) {
 			dec := ffmpegDecode(t, ffmpeg, adts, channels)
 
 			// Gate leg 2: PSNR against the source at the Phase 3 baseline,
-			// dropping the 1024-sample priming.
+			// dropping the encoder priming (aac.EncoderDelay samples).
 			src := srcFloats(data, channels, bits)
 			for c := range channels {
-				p := psnr(src[c], dec[c], 1024)
+				p := psnr(src[c], dec[c], aac.EncoderDelay)
 				t.Logf("%s ch%d: %.2f dB (%d bytes, %.1f kbps)", tc.wav, c, p,
 					oneShot.Len(), float64(oneShot.Len())*8*float64(rate)/float64(len(src[c]))/1000)
 				if p < tc.floorDB {

@@ -41,10 +41,10 @@
 //
 // # Gapless playback
 //
-// ADTS cannot signal the encoder delay (1024 priming samples) or the
-// final-frame padding, so decoders emit roughly 1024 extra leading samples
-// and up to 1023 trailing ones. Every AAC-in-ADTS stream in the world
-// behaves this way; players compensate or ignore it. Compute clip
+// ADTS cannot signal the encoder delay (aac.EncoderDelay priming samples) or
+// the final-frame padding, so decoders emit roughly aac.EncoderDelay extra
+// leading samples and up to 1023 trailing ones. Every AAC-in-ADTS stream in
+// the world behaves this way; players compensate or ignore it. Compute clip
 // durations from the source PCM, not from decoded AAC length. For
 // sample-accurate trimming a container with an edit list (MP4) is
 // required, which is out of scope for v1; the low-level aac package plus
