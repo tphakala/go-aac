@@ -33,6 +33,13 @@ type Config struct {
 	// (FFmpeg -cutoff equivalent). It must not exceed SampleRate/2. Leave
 	// it 0 for the tuned rate-dependent default.
 	Cutoff int
+
+	// Coder selects the quantizer search strategy. The zero value is
+	// aac.CoderNMR, the noise-to-mask-ratio trellis search that gives the
+	// best quality per bit (the current behaviour). aac.CoderTwoLoop and
+	// aac.CoderFast trade some quality for speed, with CoderFast the
+	// fastest.
+	Coder aac.Coder
 }
 
 // validate reports the first config problem, or nil. The checks match the
@@ -59,18 +66,24 @@ func (c Config) validate() error {
 	if c.Cutoff < 0 || c.Cutoff > c.SampleRate/2 {
 		return fmt.Errorf("go-aac/pcm: cutoff %d Hz outside 0..%d (half the sample rate)", c.Cutoff, c.SampleRate/2)
 	}
+	switch c.Coder {
+	case aac.CoderNMR, aac.CoderTwoLoop, aac.CoderFast:
+	default:
+		return fmt.Errorf("go-aac/pcm: unknown coder %d", c.Coder)
+	}
 	return nil
 }
 
 // encoderConfig maps a pcm Config onto the low-level encoder config. The
-// coder is always NMR (upstream's default and the best quality per bit)
-// and every tool stays enabled; coder choice is a low-level aac option
-// deliberately not exposed here.
+// coder comes from Config.Coder (zero value aac.CoderNMR, upstream's
+// default and the best quality per bit); every tool stays enabled, as the
+// individual tool switches are a low-level aac option not exposed here.
 func (c Config) encoderConfig() aac.EncoderConfig {
 	return aac.EncoderConfig{
 		SampleRate: c.SampleRate,
 		Channels:   c.Channels,
 		Bitrate:    c.Bitrate,
 		Cutoff:     c.Cutoff,
+		Coder:      c.Coder,
 	}
 }
