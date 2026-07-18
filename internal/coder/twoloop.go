@@ -39,7 +39,7 @@ func FindFormFactor(groupLen, swbSize int, thresh float32, scaled []float32,
 		var e, e2, variance, maxval float32
 		var nzl float32
 		for i := range swbSize {
-			s := absf(scaled[w2*128+i])
+			s := fmath.Absf(scaled[w2*128+i])
 			maxval = max(maxval, s)
 			e += s
 			s = float32(s * s) // e2 += s *= s, without cross-statement FMA
@@ -61,7 +61,7 @@ func FindFormFactor(groupLen, swbSize int, thresh float32, scaled []float32,
 
 			// compute variance
 			for i := range swbSize {
-				d := absf(scaled[w2*128+i]) - e
+				d := fmath.Absf(scaled[w2*128+i]) - e
 				t := float32(d * d) // no cross-statement FMA
 				variance += t
 			}
@@ -109,7 +109,7 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 
 	// rdlambda controls the maximum tolerated distortion; rdmin/rdmax the
 	// relative deviation allowed for tonality compensation.
-	rdlambda := clipf(2.0*120.0/lambda, 0.0625, 16.0)
+	rdlambda := fmath.Clipf(2.0*120.0/lambda, 0.0625, 16.0)
 	const nzslope = 1.5
 	rdmin := float32(0.03125)
 	rdmax := float32(1.0)
@@ -128,7 +128,7 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 	// the threshold.
 	zeroscale := float32(1.0)
 	if lambda > 120.0 {
-		zeroscale = clipf(fmath.Pow32(120.0/lambda, 0.25), 0.0625, 1.0)
+		zeroscale = fmath.Clipf(fmath.Pow32(120.0/lambda, 0.25), 0.0625, 1.0)
 	}
 
 	if bitresAlloc >= 0 {
@@ -267,7 +267,7 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 		start := w * 128
 		for g := range ics.NumSwb {
 			if nzs[g] > 0 { // upstream reads nzs[g], not nzs[w*16+g]
-				cleanupFactor := sqrf(clipf(float32(start)/(float32(cutoff)*0.75), 1.0, 2.0))
+				cleanupFactor := sqrf(fmath.Clipf(float32(start)/(float32(cutoff)*0.75), 1.0, 2.0))
 				// upstream divides by swb_sizes[w], not swb_sizes[g]
 				energy2uplim := FindFormFactor(ics.GroupLen[w], int(ics.SwbSizes[g]),
 					uplims[w*16+g]/float32(int(nzs[g])*int(ics.SwbSizes[w])),
@@ -276,7 +276,7 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 				// ABR: prioritize less, let rate control do its thing
 				energy2uplim = sqrtf32(energy2uplim)
 				energy2uplim = max(0.015625, min(1.0, energy2uplim))
-				uplims[w*16+g] *= clipf(rdlambda*energy2uplim, rdmin, rdmax) *
+				uplims[w*16+g] *= fmath.Clipf(rdlambda*energy2uplim, rdmin, rdmax) *
 					float32(ics.GroupLen[w])
 
 				energy2uplim = FindFormFactor(ics.GroupLen[w], int(ics.SwbSizes[g]),
@@ -285,7 +285,7 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 				energy2uplim *= dePsyFactor
 				energy2uplim = sqrtf32(energy2uplim)
 				energy2uplim = max(0.015625, min(1.0, energy2uplim))
-				euplims[w*16+g] *= clipf(rdlambda*energy2uplim*float32(ics.GroupLen[w]),
+				euplims[w*16+g] *= fmath.Clipf(rdlambda*energy2uplim*float32(ics.GroupLen[w]),
 					0.5, 1.0)
 			}
 			start += int(ics.SwbSizes[g])
@@ -587,14 +587,14 @@ func (c *Coder) SearchForQuantizersTwoLoop(bitRate, sampleRate, channels,
 							qenergies[w*16+g] = qenergy
 							if mb != 0 && (sce.SfIdx[w*16+g] < mindeltasf ||
 								(dists[w*16+g] < min(uplmax*uplims[w*16+g], euplims[w*16+g]) &&
-									absf(qenergies[w*16+g]-energies[w*16+g]) < euplims[w*16+g])) {
+									fmath.Absf(qenergies[w*16+g]-energies[w*16+g]) < euplims[w*16+g])) {
 								break
 							}
 						}
 					} else if tbits > toofewbits &&
 						sce.SfIdx[w*16+g] < min(maxdeltasf, maxsf[w*16+g]) &&
 						dists[w*16+g] < min(euplims[w*16+g], uplims[w*16+g]) &&
-						absf(qenergies[w*16+g]-energies[w*16+g]) < euplims[w*16+g] {
+						fmath.Absf(qenergies[w*16+g]-energies[w*16+g]) < euplims[w*16+g] {
 						// over target: save bits for more important stuff
 						for i := 0; i < depth && sce.SfIdx[w*16+g] < maxdeltasf; i++ {
 							cb := FindMinBook(maxvals[w*16+g], sce.SfIdx[w*16+g]+1)

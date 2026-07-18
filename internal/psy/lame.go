@@ -4,6 +4,7 @@ package psy
 
 import (
 	"github.com/tphakala/go-aac/internal/coder"
+	"github.com/tphakala/go-aac/internal/fmath"
 	"github.com/tphakala/go-aac/internal/tables"
 )
 
@@ -96,7 +97,7 @@ func (ctx *Context) Window(la []float32, ch, prevType int) WindowInfo {
 			pfe := pf + blockSizeLong/(numBlocksShort*psyLameNumSubblocks)
 			var p float32 = 1.0
 			for ; pf < pfe; pf++ {
-				p = max(p, absf(hpfsmpl[pf]))
+				p = max(p, fmath.Absf(hpfsmpl[pf]))
 			}
 			pch.prevEnergySubshort[i] = p
 			energySubshort[i+psyLameNumSubblocks] = p

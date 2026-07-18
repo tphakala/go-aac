@@ -104,11 +104,7 @@ func log2i(v int) int {
 	return mbits.Len32(uint32(v)) - 1
 }
 
-func clip(v, lo, hi int) int { return min(max(v, lo), hi) }
-func absf(x float32) float32 { return max(x, -x) }
-func clipf(v, lo, hi float32) float32 {
-	return min(max(v, lo), hi)
-}
+func clip(v, lo, hi int) int { return fmath.Clipi(v, lo, hi) }
 
 // quantizeAndEncodeBandCost quantizes in with scalefactor index scaleIdx and
 // codebook cb, returning the rate-distortion cost. When pb is non-nil the
@@ -202,7 +198,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 			var rd float32
 			if d.unsigned {
 				for j := range 2 {
-					t := absf(inSeg[j])
+					t := fmath.Absf(inSeg[j])
 					var quantized float32
 					if d.escape && vec[j] == 64.0 {
 						if t >= clippedEscape {
@@ -268,7 +264,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 				if d.escape {
 					for j := range 2 {
 						if vec[j] == 64.0 {
-							coef := clip(quant(absf(inSeg[j]), q, rounding), 16, (1<<13)-1)
+							coef := clip(quant(fmath.Absf(inSeg[j]), q, rounding), 16, (1<<13)-1)
 							length := log2i(coef)
 							pb.Put(length-4+1, uint32(1)<<(length-4+1)-2)
 							pb.Put(length, uint32(coef))
@@ -298,7 +294,7 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 			var rd float32
 			if d.unsigned {
 				for j := range 4 {
-					t := absf(inSeg[j])
+					t := fmath.Absf(inSeg[j])
 					quantized := float32(vec[j] * iq) // no FMA into di below
 					di := t - quantized
 					if out != nil {
