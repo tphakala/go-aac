@@ -119,3 +119,60 @@ func TestNMRWrappers(t *testing.T) {
 		t.Errorf("MaxFloat32 = %g", got)
 	}
 }
+
+func TestAbsf(t *testing.T) {
+	cases := []struct{ x, want float32 }{
+		{3, 3},
+		{-3, 3},
+		{0, 0},
+		{math.MaxFloat32, math.MaxFloat32},
+		{-math.MaxFloat32, math.MaxFloat32},
+	}
+	for _, c := range cases {
+		if got := Absf(c.x); got != c.want {
+			t.Errorf("Absf(%g) = %g, want %g", c.x, got, c.want)
+		}
+	}
+	// Absf normalizes -0.0 to +0.0: max(-0.0, +0.0) is +0.0.
+	if got := Absf(float32(math.Copysign(0, -1))); got != 0 || math.Signbit(float64(got)) {
+		t.Errorf("Absf(-0.0) = %g (signbit %v), want +0.0", got, math.Signbit(float64(got)))
+	}
+	// Absf is max(x, -x), which propagates NaN, so Absf(NaN) is NaN.
+	if got := Absf(float32(math.NaN())); !math.IsNaN(float64(got)) {
+		t.Errorf("Absf(NaN) = %g, want NaN", got)
+	}
+}
+
+func TestClipf(t *testing.T) {
+	cases := []struct {
+		v, lo, hi, want float32
+	}{
+		{-1, 0, 10, 0},  // below lo
+		{5, 0, 10, 5},   // within range
+		{20, 0, 10, 10}, // above hi
+		{0, 0, 10, 0},   // at lo
+		{10, 0, 10, 10}, // at hi
+	}
+	for _, c := range cases {
+		if got := Clipf(c.v, c.lo, c.hi); got != c.want {
+			t.Errorf("Clipf(%g, %g, %g) = %g, want %g", c.v, c.lo, c.hi, got, c.want)
+		}
+	}
+}
+
+func TestClipi(t *testing.T) {
+	cases := []struct {
+		v, lo, hi, want int
+	}{
+		{-1, 0, 10, 0},  // below lo
+		{5, 0, 10, 5},   // within range
+		{20, 0, 10, 10}, // above hi
+		{0, 0, 10, 0},   // at lo
+		{10, 0, 10, 10}, // at hi
+	}
+	for _, c := range cases {
+		if got := Clipi(c.v, c.lo, c.hi); got != c.want {
+			t.Errorf("Clipi(%d, %d, %d) = %d, want %d", c.v, c.lo, c.hi, got, c.want)
+		}
+	}
+}

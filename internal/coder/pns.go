@@ -96,7 +96,7 @@ func (c *Coder) SearchForPNS(sampleRate, bandwidth int,
 	freqMult := float32(sampleRate) * 0.5 / float32(wlen)
 	thrMult := noiseLambdaReplace * (100.0 / lambda)
 	spreadThreshold := min(0.75, noiseSpreadThreshold*max(0.5, lambda/100.0))
-	distBias := clipf(4.0*120/lambda, 0.25, 4.0)
+	distBias := fmath.Clipf(4.0*120/lambda, 0.25, 4.0)
 	pnsTransientEnergyR := min(0.7, lambda/140.0)
 
 	prev := -1000
@@ -142,7 +142,7 @@ func (c *Coder) SearchForPNS(sampleRate, bandwidth int,
 			}
 
 			// ramps down at ~8000Hz and loosens the dist threshold
-			distThresh = clipf(2.5*noiseLowLimit/freq, 0.5, 2.5) * distBias
+			distThresh = fmath.Clipf(2.5*noiseLowLimit/freq, 0.5, 2.5) * distBias
 
 			// PNS is acceptable when the band is noise-like, near
 			// threshold, and (for short groups) of stable energy; point 2

@@ -284,7 +284,7 @@ func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 		// the documented ErrInvalidAudio contract.
 		for ch := range samples {
 			for _, v := range samples[ch] {
-				if !(absf(v) <= fmath.MaxFloat32) {
+				if !(fmath.Absf(v) <= fmath.MaxFloat32) {
 					return dst, ErrInvalidAudio
 				}
 			}
@@ -454,7 +454,7 @@ func (e *Encoder) analyzeWindowAndTransform(ch int, flush bool) error {
 		wbuf := overlap[w*128:]
 		var maxAbs float32
 		for j := range wlen {
-			maxAbs = max(maxAbs, absf(wbuf[j]))
+			maxAbs = max(maxAbs, fmath.Absf(wbuf[j]))
 		}
 		if maxAbs > clipAvoidanceFactor {
 			ics.WindowClipping[w] = true
@@ -473,10 +473,7 @@ func (e *Encoder) analyzeWindowAndTransform(ch int, flush bool) error {
 
 	// NaN/Inf guard (aacenc.c:1119-1124): the !(x < 1e16) form catches NaN.
 	for k := range 1024 {
-		v := sce.Coeffs[k]
-		if v < 0 {
-			v = -v
-		}
+		v := fmath.Absf(sce.Coeffs[k])
 		if !(v < 1e16) {
 			return ErrInvalidAudio
 		}
@@ -997,8 +994,6 @@ func b2i(b bool) int {
 	}
 	return 0
 }
-
-func absf(x float32) float32 { return max(x, -x) }
 
 // sqrtf keeps the rate loop reading like the C source it mirrors.
 func sqrtf(x float32) float32 { return fmath.Sqrt32(x) }

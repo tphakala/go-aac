@@ -294,7 +294,7 @@ func New(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [
 			coeff.spreadHi[1] = float32(fmath.Exp10(float64(-barkWidth * enSpreadHi)))
 			peMin := barkPe * barkWidth
 			minsnr := float32(fmath.Exp2(float64(peMin/float32(bandSizes[g]))) - 1.5)
-			coeff.minSnr = clipf(1.0/minsnr, psySnr25dB, psySnr1dB)
+			coeff.minSnr = fmath.Clipf(1.0/minsnr, psySnr25dB, psySnr1dB)
 		}
 		start := 0
 		for g := range numBands[j] {
@@ -354,7 +354,3 @@ func lameCalcAttackThreshold(bitrate int) float32 {
 	}
 	return tables.PsyABRMap[upperRange].StLrm
 }
-
-func clipf(v, lo, hi float32) float32 { return min(max(v, lo), hi) }
-func absf(x float32) float32          { return max(x, -x) }
-func clipi(v, lo, hi int) int         { return min(max(v, lo), hi) }

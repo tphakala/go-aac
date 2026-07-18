@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Package fmath centralizes the math primitives used by encoder code paths
-// (docs/go-design.md: only this package imports math in per-frame code).
+// (docs/go-design.md: only this package imports math in per-frame code). It
+// also holds shared scalar helpers (Absf, Clipf, Clipi) that use only Go
+// builtins and add no math import, so the package fence stays intact.
 package fmath
 
 import "math"
@@ -108,3 +110,14 @@ const MaxFloat32 = math.MaxFloat32
 // Sqrt64 is float64 square root, replacing C double sqrt where the C
 // promotes float operands (the intensity stereo downmix scale).
 func Sqrt64(x float64) float64 { return math.Sqrt(x) }
+
+// Absf is the float32 absolute value, expressed as max(x, -x) so it inlines
+// with no math import. It propagates NaN: max(NaN, -NaN) is NaN, so
+// Absf(NaN) is NaN. It also normalizes -0.0 to +0.0.
+func Absf(x float32) float32 { return max(x, -x) }
+
+// Clipf clamps v to the inclusive range [lo, hi] for float32 operands.
+func Clipf(v, lo, hi float32) float32 { return min(max(v, lo), hi) }
+
+// Clipi clamps v to the inclusive range [lo, hi] for int operands.
+func Clipi(v, lo, hi int) int { return min(max(v, lo), hi) }

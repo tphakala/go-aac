@@ -33,10 +33,7 @@ func computeLPCCoefsFixed(autoc []int32, order int, lpc []int32) {
 // @ d09d5afc3a. The coefficient reads/writes wrap like the C's UINTFLOAT*
 // arithmetic (Go int32 wraps identically).
 func applyTNS(coef []int32, tns *TNSData, ics *ICSInfo) {
-	mmm := ics.TNSMaxBands
-	if ics.MaxSFB < mmm {
-		mmm = ics.MaxSFB
-	}
+	mmm := min(ics.TNSMaxBands, ics.MaxSFB)
 	if mmm == 0 {
 		return
 	}
@@ -47,10 +44,7 @@ func applyTNS(coef []int32, tns *TNSData, ics *ICSInfo) {
 		bottom := ics.NumSWB
 		for filt := range tns.NFilt[w] {
 			top := bottom
-			bottom = top - tns.Length[w][filt]
-			if bottom < 0 {
-				bottom = 0
-			}
+			bottom = max(0, top-tns.Length[w][filt])
 			order := tns.Order[w][filt]
 			if order == 0 {
 				continue
@@ -58,16 +52,8 @@ func applyTNS(coef []int32, tns *TNSData, ics *ICSInfo) {
 
 			computeLPCCoefsFixed(tns.CoefFixed[w][filt][:], order, lpc[:])
 
-			lo := bottom
-			if mmm < lo {
-				lo = mmm
-			}
-			hi := top
-			if mmm < hi {
-				hi = mmm
-			}
-			start := int(offsets[lo])
-			end := int(offsets[hi])
+			start := int(offsets[min(bottom, mmm)])
+			end := int(offsets[min(top, mmm)])
 			size := end - start
 			if size <= 0 {
 				continue
@@ -81,10 +67,7 @@ func applyTNS(coef []int32, tns *TNSData, ics *ICSInfo) {
 			start += w * 128
 
 			for m := 0; m < size; m, start = m+1, start+inc {
-				lim := order
-				if m < lim {
-					lim = m
-				}
+				lim := min(m, order)
 				for i := 1; i <= lim; i++ {
 					coef[start] -= aacMul26(coef[start-i*inc], lpc[i-1])
 				}

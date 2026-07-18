@@ -29,9 +29,9 @@ func (ctx *Context) calcBitDemand(pe float32, bits, size int, shortWindow bool) 
 	}
 
 	ctx.fillLevel += ctx.frameBits - bits
-	ctx.fillLevel = clipi(ctx.fillLevel, 0, size)
-	fillLevel := clipf(float32(ctx.fillLevel)/float32(size), clipLow, clipHigh)
-	clippedPe := clipf(pe, ctx.pe.min, ctx.pe.max)
+	ctx.fillLevel = fmath.Clipi(ctx.fillLevel, 0, size)
+	fillLevel := fmath.Clipf(float32(ctx.fillLevel)/float32(size), clipLow, clipHigh)
+	clippedPe := fmath.Clipf(pe, ctx.pe.min, ctx.pe.max)
 	bitSave := (fillLevel + bitsaveAdd) * bitsaveSlope
 	bitSpend := (fillLevel + bitspendAdd) * bitspendSlope
 	// The bit factor formula deviates from the (incorrect) spec graph; see
@@ -118,7 +118,7 @@ func calcThr3gpp(wi *WindowInfo, numBands int, pch *channel, bandSizes []uint8,
 				for i := range int(bandSizes[g]) {
 					t := coefs[start+i] * coefs[start+i]
 					band.energy += t
-					formFactor += fmath.Sqrt32(absf(coefs[start+i]))
+					formFactor += fmath.Sqrt32(fmath.Absf(coefs[start+i]))
 				}
 			}
 			if band.energy > 0 {
@@ -224,7 +224,7 @@ func (ctx *Context) analyzeChannel(ch int, coefs []float32, wi *WindowInfo) {
 	desiredPe = bitsToPE(desiredBits)
 	// NOTE: PE correction is kept simple (aacpsy.c:747-750).
 	if ctx.Bitres.Bits > 0 {
-		desiredPe *= clipf(ctx.pe.previous/bitsToPE(float32(ctx.Bitres.Bits)),
+		desiredPe *= fmath.Clipf(ctx.pe.previous/bitsToPE(float32(ctx.Bitres.Bits)),
 			0.85, 1.15)
 	}
 	ctx.pe.previous = bitsToPE(desiredBits)
@@ -286,7 +286,7 @@ func (ctx *Context) analyzeChannel(ch int, coefs []float32, wi *WindowInfo) {
 				}
 			}
 			deltaPe = desiredPe - pe
-			if absf(deltaPe) > 0.05*desiredPe {
+			if fmath.Absf(deltaPe) > 0.05*desiredPe {
 				break
 			}
 		}

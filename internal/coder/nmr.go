@@ -660,10 +660,10 @@ func (c *Coder) SearchForQuantizersNMR(in *NMRInput, st *NMRState,
 		cc := st.LamRC * fmath.Pow32(lam/st.LamRC, nmrRCTrack)
 		r := float32(float64(in.BitRate) * 1024.0 / float64(in.SampleRate))
 		cc *= fmath.Exp232(-nmrRCKCBR * float32(st.RCFill) / r)
-		st.LamRC = clipf(cc, 1e-6, 1e4)
+		st.LamRC = fmath.Clipf(cc, 1e-6, 1e4)
 	} else if rcEligible && nbnd >= 8 {
 		// bootstrap the servo off the first substantive frame
-		st.LamRC = clipf(lam, 1e-4, 10.0)
+		st.LamRC = fmath.Clipf(lam, 1e-4, 10.0)
 	}
 
 	{ // PNS
