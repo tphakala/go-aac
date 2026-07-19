@@ -66,6 +66,12 @@ type NMRState struct {
 	FramesSinceShort int     // long frames since the last short run
 	PrevWasShort     bool    // previous frame was a short block
 	RunBurst         float32 // transient bit-burst factor
+
+	// trellis is per-encoder scratch for the goaac_simd trellis kernel.
+	// Fixed-size arrays keep the encoder at 0 allocs/frame; the zero value
+	// is valid because the SIMD wrapper writes every cell it reads within a
+	// call (NMRState is reset by struct zeroing in internal/enc).
+	trellis nmrTrellisScratch
 }
 
 // NMRInput carries the encoder-context inputs of
@@ -104,10 +110,13 @@ func ceilDiv(a, b int) int {
 	return q
 }
 
-// nmrTrellisStep runs one Viterbi step: for each current-band candidate,
+// nmrTrellisStepScalar runs one Viterbi step: for each current-band candidate,
 // find the previous-band candidate minimising dpp[op] + lamsf[d], then set
 // dp[o] = node[o] + that cost and record the back-pointer bp[o].
 // Mirrors aacencdsp.c:nmr_trellis_step_c @ d09d5afc3a, the SCALAR kernel.
+// This is the canonical kernel: the default build calls it directly through
+// the nmrTrellisStep forwarder, and the goaac_simd build falls back to it for
+// step <= 0 (which nmrSolve never passes, but the equivalence sweep does).
 // Both accumulations are plain adds with no multiply, so no FMA can arise
 // here and every add stays separately rounded. Separately: walking op in
 // ascending order under a strict c < bestc is what makes a tie pick the
@@ -126,7 +135,7 @@ func ceilDiv(a, b int) int {
 // but they check cap, not len: a short slice with spare capacity is silently
 // extended rather than rejected. lamsf is not re-sliced, so like the C it
 // faults only on an access that actually reaches past it.
-func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
+func nmrTrellisStepScalar(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	nCur, nPrev, base, step, mdiff int) {
 	// Re-slice to the loop bound so the indexing needs no in-loop check.
 	// This is the BCE recipe measured to work in this repo; the lamsf index
@@ -233,7 +242,7 @@ func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 				node[o] = st.Nd[b][o] + t
 			}
 			nmrTrellisStep(dp[:], bp[k][:], dpp[:], node[:], lamsf[:],
-				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff)
+				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff, &st.trellis)
 		}
 
 		// backtrack

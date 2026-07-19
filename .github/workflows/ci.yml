@@ -42,9 +42,21 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
+      # The goaac_simd build swaps in the f32.MinIdxOfSumRows trellis kernel.
+      # Its output is byte-identical, but it links assembly and must be tested
+      # on every arch this matrix covers or it can rot unnoticed.
+      - name: Run tests (goaac_simd)
+        run: go test -race -tags goaac_simd ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lint the default build and the goaac_simd build; the tagged file is
+        # only compiled (and so only linted) with the tag set.
+        tags: ['', 'goaac_simd']
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -56,6 +68,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: ${{ matrix.tags != '' && format('--build-tags {0}', matrix.tags) || '' }}
 
   vet:
     name: Vet
@@ -76,6 +89,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go vet ./...
 
+      - name: Run go vet (goaac_simd)
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: go vet -tags goaac_simd ./...
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -95,6 +113,12 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
+
+      - name: Build (goaac_simd)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -tags goaac_simd ./...
 
   fuzz:
     name: Fuzz smoke
@@ -120,6 +144,12 @@ jobs:
         run: go test -run='^$' -fuzz=FuzzDecodeFrame -fuzztime=20s ./internal/dec/
       - name: Fuzz public stream decode
         run: go test -run='^$' -fuzz=FuzzDecodeStream -fuzztime=20s ./pcm/
+
+      # The goaac_simd trellis kernel against the naive C-transcription
+      # reference: random shapes the fixed grid only samples, asserting
+      # bit-identical output and never-panic.
+      - name: Fuzz SIMD trellis differential
+        run: go test -run='^$' -fuzz=FuzzNMRTrellisStep -fuzztime=20s -tags goaac_simd ./internal/coder/
 
   # The differential/PSNR gates are the only check that can tell a correct
   # encoder from a plausible-but-wrong one; PSNR alone cannot see a misported
@@ -189,8 +219,14 @@ jobs:
         # GOAAC_REQUIRE_ORACLE turns a missing oracle into a failure instead of
         # a skip. Without it this job could silently degrade to the very bug it
         # closes. -count=1 because setup-go restores the Go test cache, and a
-        # cached ok would otherwise satisfy the gate without running it.
+        # cached ok would otherwise satisfy the gate without running it. The
+        # goaac_simd run gates the SIMD trellis kernel byte-identical against
+        # the same oracle (not merely transitively through the scalar), on the
+        # AVX2 path this runner provides, so the tagged build cannot drift.
         run: |
           GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
           GOAAC_REQUIRE_ORACLE=1 \
             go test -count=1 ./...
+          GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
+          GOAAC_REQUIRE_ORACLE=1 \
+            go test -count=1 -tags goaac_simd ./...
