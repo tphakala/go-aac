@@ -87,14 +87,14 @@ func TestAbsPow34MatchesScalar(t *testing.T) {
 		// source would corrupt the encoder's coefficients (in is sce.Coeffs at
 		// the call sites). Check it before absPow34Scalar reads in below, or a
 		// mutation would corrupt want too and hide in the got==want compare.
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if math.Float32bits(in[i]) != math.Float32bits(inBefore[i]) {
 				t.Fatalf("n=%d: AbsPow34 mutated its input at i=%d: %#x -> %#x",
 					n, i, math.Float32bits(inBefore[i]), math.Float32bits(in[i]))
 			}
 		}
 		absPow34Scalar(want, in)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
 				t.Fatalf("n=%d i=%d in=%v: got %v (%#x), want %v (%#x)",
 					n, i, in[i], got[i], math.Float32bits(got[i]), want[i], math.Float32bits(want[i]))
@@ -145,7 +145,7 @@ func FuzzAbsPow34Equiv(f *testing.F) {
 		want := make([]float32, n)
 		AbsPow34(got, in)
 		absPow34Scalar(want, in)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
 				t.Fatalf("n=%d i=%d in=%v: got %#x, want %#x",
 					n, i, in[i], math.Float32bits(got[i]), math.Float32bits(want[i]))
