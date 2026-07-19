@@ -37,7 +37,8 @@ bitrate:
 | 15 s distant owl call             | **63.90 dB** | 63.87 dB |
 
 Not implemented: HE-AAC (SBR/PS), xHE-AAC, LATM, ER/LD/ELD profiles,
-multichannel beyond stereo, VBR (`global_quality`), MP4 muxing.
+multichannel beyond stereo, VBR (`global_quality`), MP4 muxing (the pure-Go
+[go-m4a](https://github.com/tphakala/go-m4a) is the container companion).
 
 ## Approach
 
@@ -146,6 +147,14 @@ streamable ADTS stream, or `Encoder.AudioSpecificConfig` to mux them elsewhere.
 ADTS cannot signal encoder delay. Decoders emit roughly 1024 extra leading
 samples, and every AAC-in-ADTS stream behaves this way. Compute clip durations
 from the source PCM, not from the decoded AAC length.
+
+For gapless, sample-accurate output, mux into a container that carries an edit
+list. [go-m4a](https://github.com/tphakala/go-m4a) is the pure-Go MP4/M4A muxer
+and demuxer that pairs with go-aac for exactly this: it writes the encoder
+priming (`aac.EncoderDelay`, also `Encoder.Delay`) into an `elst` edit list so
+playback is gapless, and reads `.m4a` files back into access units. Its
+`aacm4a` subpackage is a one-call bridge over go-aac, PCM to `.m4a` and back.
+No cgo and no external binaries.
 
 ## Benchmarking
 
