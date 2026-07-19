@@ -42,9 +42,10 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
-      # The goaac_simd build swaps in the f32.MinIdxOfSumRows trellis kernel.
-      # Its output is byte-identical, but it links assembly and must be tested
-      # on every arch this matrix covers or it can rot unnoticed.
+      # The goaac_simd build swaps in the f32.MinIdxOfSumRows trellis kernel and
+      # the f32.AbsPow34 magnitude kernel. Their output is byte-identical, but
+      # they link assembly and must be tested on every arch this matrix covers or
+      # they can rot unnoticed.
       - name: Run tests (goaac_simd)
         run: go test -race -tags goaac_simd ./...
 
@@ -150,6 +151,9 @@ jobs:
       # bit-identical output and never-panic.
       - name: Fuzz SIMD trellis differential
         run: go test -run='^$' -fuzz=FuzzNMRTrellisStep -fuzztime=20s -tags goaac_simd ./internal/coder/
+      # The goaac_simd AbsPow34 kernel against the scalar reference it must match.
+      - name: Fuzz SIMD AbsPow34 differential
+        run: go test -run='^$' -fuzz=FuzzAbsPow34Equiv -fuzztime=20s -tags goaac_simd ./internal/dsp/
 
   # The differential/PSNR gates are the only check that can tell a correct
   # encoder from a plausible-but-wrong one; PSNR alone cannot see a misported
@@ -220,9 +224,10 @@ jobs:
         # a skip. Without it this job could silently degrade to the very bug it
         # closes. -count=1 because setup-go restores the Go test cache, and a
         # cached ok would otherwise satisfy the gate without running it. The
-        # goaac_simd run gates the SIMD trellis kernel byte-identical against
-        # the same oracle (not merely transitively through the scalar), on the
-        # AVX2 path this runner provides, so the tagged build cannot drift.
+        # goaac_simd run gates the SIMD trellis and AbsPow34 kernels
+        # byte-identical against the same oracle (not merely transitively
+        # through the scalar), on the AVX2 path this runner provides, so the
+        # tagged build cannot drift.
         run: |
           GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
           GOAAC_REQUIRE_ORACLE=1 \
