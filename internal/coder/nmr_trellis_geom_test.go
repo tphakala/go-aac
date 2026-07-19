@@ -3,11 +3,12 @@ package coder
 
 import "testing"
 
-// TestNMRTrellisGeomExamples pins the four worked geometry examples from the
-// SIMD trellis plan (issue #38), including the lamsf indices the kernel
-// materialisation walks, so a future change to nmrTrellisGeom or the wrapper's
-// index algebra fails here with a readable diff rather than only as a byte
-// mismatch in the encoder output.
+// TestNMRTrellisGeomExamples pins the worked geometry examples from the SIMD
+// trellis plan (issue #38): three tabulated in-window and edge cases plus the
+// globally-empty case checked at the end, including the lamsf indices the
+// kernel materialisation walks, so a future change to nmrTrellisGeom or the
+// wrapper's index algebra fails here with a readable diff rather than only as a
+// byte mismatch in the encoder output.
 func TestNMRTrellisGeomExamples(t *testing.T) {
 	cases := []struct {
 		name                           string
