@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-// Package dsp provides the scalar DSP kernels of the AAC encoder.
+// Package dsp provides the scalar DSP kernels of the AAC encoder. The exported
+// AbsPow34 is a per-build dispatch point: the default build calls the canonical
+// absPow34Scalar defined here, while the goaac_simd build swaps in an f32-backed
+// version producing byte-identical output. The scalar stays canonical.
 package dsp
 
 import "github.com/tphakala/go-aac/internal/fmath"
@@ -18,7 +21,7 @@ import "github.com/tphakala/go-aac/internal/fmath"
 // That re-slice is load-bearing, not cosmetic: it is the form the compiler can
 // prove, so the per-element bounds checks leave the loop body. Verified on
 // go1.25 arm64 with -gcflags=-d=ssa/check_bce/debug=1: VectorFMul carried two
-// bounds checks per element and AbsPow34 one; after the re-slice the loops carry
+// bounds checks per element and absPow34Scalar one; after the re-slice the loops carry
 // none and only a single check per call remains. Measured (min of 10, n=1024):
 // AbsPow34 346.8 -> 242.8 ns/op, VectorFMul 269.1 -> 240.9 ns/op. Hoisting a
 // bare `_ = src0[len(dst)-1]` instead does not work: it removes none of the
@@ -52,9 +55,12 @@ func VectorFMulReverse(dst, src0, src1 []float32) {
 	}
 }
 
-// AbsPow34 computes out[i] = |in[i]|^(3/4) via nested square roots.
-// Mirrors libavcodec/aacencdsp.c:abs_pow34_v @ d09d5afc3a.
-func AbsPow34(out, in []float32) {
+// absPow34Scalar computes out[i] = |in[i]|^(3/4) via nested square roots.
+// Mirrors libavcodec/aacencdsp.c:abs_pow34_v @ d09d5afc3a. This is the canonical
+// scalar kernel; the exported AbsPow34 is a per-build dispatch (abspow34_noasm.go
+// and abspow34_simd.go), and abspow34_simd_equiv_test.go gates the tagged build
+// bitwise against it.
+func absPow34Scalar(out, in []float32) {
 	if len(in) < len(out) {
 		panic("dsp: AbsPow34: source shorter than out")
 	}

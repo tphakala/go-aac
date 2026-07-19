@@ -191,29 +191,35 @@ changes AAC encoding by about 1%. It is compiler auto-vectorization. GCC emits
 631 packed floating-point arithmetic instructions in `aaccoder.o` from plain C,
 concentrated in the NMR quantizer search; Go's compiler emits none anywhere in
 the equivalent package. Closing the gap therefore means hand-writing in Go what
-C compilers generate for free. The optional SIMD trellis below takes the first
-step; the scalar port remains the canonical reference.
+C compilers generate for free. The optional SIMD kernels below take the first
+steps; the scalar port remains the canonical reference.
 
 Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
 and stereo. Decoding is far cheaper, roughly 3000x real time for mono and 1500x
 for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
 
-### Optional SIMD trellis (`-tags goaac_simd`)
+### Optional SIMD kernels (`-tags goaac_simd`)
 
-Building with `-tags goaac_simd` swaps the encoder's hottest kernel, the NMR
-Viterbi trellis search, for a SIMD implementation built on
-[github.com/tphakala/simd](https://github.com/tphakala/simd): AVX2 on x86_64,
-NEON on arm64, and a portable Go fallback everywhere else. Every backend is
-bit-identical, so the tagged build produces byte-identical output to the scalar
-default and passes the same differential oracle gate, not a relaxed PSNR tier.
+Building with `-tags goaac_simd` swaps two of the encoder's hottest kernels for
+SIMD implementations built on
+[github.com/tphakala/simd](https://github.com/tphakala/simd): the NMR Viterbi
+trellis search and the AbsPow34 magnitude transform (`|x|^(3/4)`), with AVX2 on
+x86_64, NEON on arm64, and a portable Go fallback everywhere else. Every backend
+is bit-identical, so the tagged build produces byte-identical output to the
+scalar default and passes the same differential oracle gate, not a relaxed PSNR
+tier.
 
-Measured full-encode speedups over the scalar default (128 kbps, single
-recording, `benchstat` over interleaved rounds):
+Measured full-encode speedups of the SIMD trellis over the scalar default
+(128 kbps, single recording, `benchstat` over interleaved rounds):
 
 | Platform | Full-encode NMR |
 | -------- | --------------: |
 | Raspberry Pi 5 (Cortex-A76, NEON) | 14% faster |
 | x86_64 i7-1260P (AVX2) | 22% faster |
+
+The AbsPow34 kernel adds a further speedup on top: on the x86_64 i7-1260P it
+cuts the full nmr encode by about 2.7% (4.6% with the psychoacoustic tools
+disabled), measured the same way. The Raspberry Pi 5 NEON figure is pending.
 
 The default build stays pure Go, with no assembly in the binary and the `simd`
 dependency linked only under the tag. The tag is opt-in and the scalar kernel
