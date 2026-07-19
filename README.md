@@ -209,17 +209,18 @@ is bit-identical, so the tagged build produces byte-identical output to the
 scalar default and passes the same differential oracle gate, not a relaxed PSNR
 tier.
 
-Measured full-encode speedups of the SIMD trellis over the scalar default
-(128 kbps, single recording, `benchstat` over interleaved rounds):
+Measured full-encode NMR speedups over the scalar default (128 kbps, single
+recording, `benchstat` over interleaved rounds):
 
-| Platform | Full-encode NMR |
-| -------- | --------------: |
-| Raspberry Pi 5 (Cortex-A76, NEON) | 14% faster |
-| x86_64 i7-1260P (AVX2) | 22% faster |
+| Platform | SIMD trellis | Both kernels |
+| -------- | -----------: | -----------: |
+| Raspberry Pi 5 (Cortex-A76, NEON) | 14% faster | pending |
+| x86_64 i7-1260P (AVX2) | 22% faster | about 24% faster |
 
-The AbsPow34 kernel adds a further speedup on top: on the x86_64 i7-1260P it
-cuts the full nmr encode by about 2.7% (4.6% with the psychoacoustic tools
-disabled), measured the same way. The Raspberry Pi 5 NEON figure is pending.
+The trellis search is the larger lever; the AbsPow34 kernel adds roughly a
+further 2.7% on the i7-1260P (4.6% with the psychoacoustic tools disabled). The
+Raspberry Pi 5 figure for AbsPow34 is pending. Both kernels are byte-identical
+to the scalar port, so the tag is a pure speed knob with no effect on output.
 
 The default build stays pure Go, with no assembly in the binary and the `simd`
 dependency linked only under the tag. The tag is opt-in and the scalar kernel
