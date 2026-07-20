@@ -27,9 +27,11 @@ func newResetCfg(c resetCfg) *Context {
 	return New(c.rate, c.bitrate, c.channels, c.cutoff, bands, numBands)
 }
 
-// TestResetEqualsNew is the byte-exactness gate for the pooled reset path
-// (issue #41): a Context reset to a target config must be indistinguishable
-// from one freshly built by New for that config. It checks two things:
+// TestResetEqualsNew is the reset-equivalence gate for the pooled reset path
+// (issue #41): a Context reset to a target config must equal one freshly built
+// by New for that config under reflect.DeepEqual, which compares field values
+// and slice length and contents but not slice capacity (a reused slice may keep
+// spare capacity after a shrink, which no consumer reads). It checks two things:
 //   - resetting from a DIFFERENT prior config, covering both the slice
 //     reslice+clear branch (shrink) and the reallocate branch (grow), and
 //   - resetting a SAME-config context whose reused per-channel slices were
@@ -53,7 +55,7 @@ func TestResetEqualsNew(t *testing.T) {
 		fromPrior := newResetCfg(prior)
 		fromPrior.Reset(tc.rate, tc.bitrate, tc.channels, tc.cutoff, bands, numBands)
 		if !reflect.DeepEqual(want, fromPrior) {
-			t.Errorf("target %+v reset from %+v: not byte-identical to fresh New", tc, prior)
+			t.Errorf("target %+v reset from %+v: not DeepEqual to fresh New", tc, prior)
 		}
 
 		// Arm 2: reset a same-config context whose reused slices carry stale

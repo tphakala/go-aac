@@ -214,8 +214,8 @@ func (e *Encoder) Reset(cfg Config) error {
 	// context is reused across a Reset (its per-channel slices recycled and every
 	// field recomputed), so a pooled encoder rebuilds it allocation-free on a
 	// same-shape reuse (only a grown channel count reallocates the slices) while
-	// staying byte-identical to a fresh init (issue #41). psy.New builds it on the
-	// first Reset, when no context has been retained yet.
+	// producing byte-identical output to a fresh init (issue #41). psy.New builds
+	// it on the first Reset, when no context has been retained yet.
 	bands := [2][]uint8{tables.SwbSize1024[idx], tables.SwbSize128[idx]}
 	numBands := [2]int{int(tables.NumSwb1024[idx]), int(tables.NumSwb128[idx])}
 	if psyCtx == nil {

@@ -232,12 +232,15 @@ func New(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [
 // Reset re-arms an existing Context for a new, independent stream with the
 // given parameters, reusing the Context and the two per-channel slices
 // (channel and FFChannel are pure value types) so a pooled encoder rebuilds
-// the psychoacoustic model without allocating. The result is byte-identical to
-// a fresh New(...) with the same arguments: every field is recomputed here, and
-// the reused slices are cleared to the same zeroed state make would have
-// produced. This backs the allocation-free pcm.EncodeInterleaved reuse path
-// (issue #41). Growing the channel count reallocates the per-channel slices;
-// shrinking or matching it reslices and clears them in place.
+// the psychoacoustic model without allocating. Every field is recomputed here
+// and the reused slices are cleared to the same zeroed state make would have
+// produced, so the result is field-for-field equal to a fresh New(...) with the
+// same arguments and the encoder output stays byte-identical. The one difference
+// is unobservable: a reused slice may keep spare capacity after a shrink (cap,
+// not len or contents), which no consumer reads. This backs the allocation-free
+// pcm.EncodeInterleaved reuse path (issue #41). Growing the channel count
+// reallocates the per-channel slices; shrinking or matching it reslices and
+// clears them in place.
 func (ctx *Context) Reset(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [2]int) {
 	// Reuse the per-channel slices when they already hold enough room; both
 	// element types are allocation-free value structs, so re-slicing and
