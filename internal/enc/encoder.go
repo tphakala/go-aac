@@ -151,7 +151,7 @@ func (e *Encoder) Reset(cfg Config) error {
 	// Retain the reusable heap objects across the wipe. Zeroing the whole
 	// struct (about 650 KiB of inline arrays) is what guarantees a Reset
 	// encoder is indistinguishable from a fresh one.
-	mdct1024, mdct128, nmr, pb, pbBuf := e.mdct1024, e.mdct128, e.nmr, e.pb, e.pbBuf
+	mdct1024, mdct128, nmr, pb, pbBuf, psyCtx := e.mdct1024, e.mdct128, e.nmr, e.pb, e.pbBuf, e.psy
 	*e = Encoder{
 		cfg:             cfg,
 		samplerateIndex: idx,
@@ -210,13 +210,22 @@ func (e *Encoder) Reset(cfg Config) error {
 	}
 	e.cd.RandomState = 0x1f2e3d4c // PNS LFSR seed (aacenc.c:1640)
 
-	// Psy model init (ff_psy_init call site, aacenc.c:1630-1638). The
-	// context is small (~4 KiB); rebuilding it keeps Reset simple and
-	// exactly equivalent to a fresh init.
+	// Psy model init (ff_psy_init call site, aacenc.c:1630-1638). The retained
+	// context is reused across a Reset (its per-channel slices recycled and every
+	// field recomputed), so a pooled encoder rebuilds it allocation-free on a
+	// same-shape reuse (only a grown channel count reallocates the slices) while
+	// staying byte-identical to a fresh init (issue #41). psy.New builds it on the
+	// first Reset, when no context has been retained yet.
 	bands := [2][]uint8{tables.SwbSize1024[idx], tables.SwbSize128[idx]}
 	numBands := [2]int{int(tables.NumSwb1024[idx]), int(tables.NumSwb128[idx])}
-	e.psy = psy.New(cfg.SampleRate, cfg.Bitrate, cfg.Channels, e.bandwidth,
-		bands, numBands)
+	if psyCtx == nil {
+		e.psy = psy.New(cfg.SampleRate, cfg.Bitrate, cfg.Channels, e.bandwidth,
+			bands, numBands)
+	} else {
+		psyCtx.Reset(cfg.SampleRate, cfg.Bitrate, cfg.Channels, e.bandwidth,
+			bands, numBands)
+		e.psy = psyCtx
+	}
 
 	for ch := range cfg.Channels {
 		e.coeffPtrs[ch] = e.cpe.Ch[ch].Coeffs[:]

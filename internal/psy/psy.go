@@ -224,14 +224,46 @@ func ath(f, add float32) float32 {
 // bandwidth in Hz (always non-zero: the encoder computes it at init).
 // The QSCALE/global_quality branches are not ported (ABR only in Phase 2).
 func New(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [2]int) *Context {
-	ctx := &Context{
+	ctx := &Context{}
+	ctx.Reset(sampleRate, bitRate, channels, cutoff, bands, numBands)
+	return ctx
+}
+
+// Reset re-arms an existing Context for a new, independent stream with the
+// given parameters, reusing the Context and the two per-channel slices
+// (channel and FFChannel are pure value types) so a pooled encoder rebuilds
+// the psychoacoustic model without allocating. The result is byte-identical to
+// a fresh New(...) with the same arguments: every field is recomputed here, and
+// the reused slices are cleared to the same zeroed state make would have
+// produced. This backs the allocation-free pcm.EncodeInterleaved reuse path
+// (issue #41). Growing the channel count reallocates the per-channel slices;
+// shrinking or matching it reslices and clears them in place.
+func (ctx *Context) Reset(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [2]int) {
+	// Reuse the per-channel slices when they already hold enough room; both
+	// element types are allocation-free value structs, so re-slicing and
+	// clearing reproduces a fresh make exactly.
+	ch := ctx.Ch
+	if cap(ch) >= channels {
+		ch = ch[:channels]
+		clear(ch)
+	} else {
+		ch = make([]FFChannel, channels)
+	}
+	pch := ctx.pch
+	if cap(pch) >= channels {
+		pch = pch[:channels]
+		clear(pch)
+	} else {
+		pch = make([]channel, channels)
+	}
+	*ctx = Context{
 		sampleRate: sampleRate,
 		channels:   channels,
 		Bands:      bands,
 		NumBands:   numBands,
 		Cutoff:     cutoff,
-		Ch:         make([]FFChannel, channels),
-		pch:        make([]channel, channels),
+		Ch:         ch,
+		pch:        pch,
 	}
 
 	chanBitrate := bitRate / channels
@@ -320,8 +352,6 @@ func New(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [
 			pch.prevEnergySubshort[j] = 10.0
 		}
 	}
-
-	return ctx
 }
 
 // lameCalcAttackThreshold maps an ABR bitrate (kbps per channel) to the
