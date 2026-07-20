@@ -54,8 +54,11 @@ func TestEncodeSteadyStateAllocs(t *testing.T) {
 
 // TestEncodeInterleavedReuseAllocs guards the sync.Pool path: repeated
 // same-shape one-shot encodes must reuse the pooled encoder's large state
-// (about 650 KiB). The small bound covers the per-Reset psychoacoustic
-// context rebuild, not any per-frame or per-buffer churn.
+// (about 650 KiB) and now the psychoacoustic context too (issue #41). A warmed
+// pool is allocation-free in a normal build; the bound stays generous because
+// `go test -race` instruments sync.Pool and inflates the count to a handful.
+// The exact zero-allocation gate for the psy reuse lives in the pool-free
+// internal/psy TestResetNoAllocSameChannels, which stays at 0 even under -race.
 func TestEncodeInterleavedReuseAllocs(t *testing.T) {
 	cfg := Config{SampleRate: 48000, BitDepth: 16, Channels: 2, Bitrate: 128000}
 	pcm := genPCM16(4096+100, 2)
@@ -69,9 +72,12 @@ func TestEncodeInterleavedReuseAllocs(t *testing.T) {
 		}
 	})
 	t.Logf("EncodeInterleaved same-shape reuse: %.2f allocs/op", allocs)
-	const maxAllocs = 16 // psy context rebuild only; a dropped pool would cost hundreds of KiB
-	if allocs > maxAllocs {
-		t.Errorf("EncodeInterleaved allocates %.0f/op (want <= %d); pool reuse likely regressed", allocs, maxAllocs)
+	// encodeReuseMaxAllocs is build-tag dependent (raceflag_*_test.go): exactly 0
+	// in a normal build (warmed pool + reused psy context allocate nothing),
+	// relaxed under -race where the detector instruments sync.Pool. Either way a
+	// dropped pool re-allocates the ~650 KiB workspace and costs hundreds of allocs.
+	if allocs > encodeReuseMaxAllocs {
+		t.Errorf("EncodeInterleaved allocates %.0f/op (want <= %d); pool or psy reuse regressed", allocs, encodeReuseMaxAllocs)
 	}
 }
 
