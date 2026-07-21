@@ -48,13 +48,20 @@ const DefaultBitrate = 200_000
 // CoderTwoLoop is faster than CoderNMR on broadband material but several times
 // slower on tonal material. See each constant for the measurements.
 //
-// The coders also code to different bandwidths when Cutoff is 0. CoderNMR
-// takes FFmpeg's tuned rate-to-bandwidth table, about 20 kHz at 200 kb/s per
-// channel, while CoderTwoLoop and CoderFast fall through to
-// AAC_CUTOFF_FROM_BITRATE, about 22 kHz. So a twoloop stream keeps roughly
-// 2 kHz more highs than an NMR stream at the same bitrate, which is visible on
-// a spectrogram as a higher shelf and is faithful to upstream
-// (aacenc.c:1592-1614 @ d09d5afc3a).
+// The coders also code to different bandwidths when Cutoff is 0, and neither
+// is consistently the wider one. CoderNMR takes FFmpeg's tuned
+// rate-to-bandwidth table above 32 kb/s per channel, while CoderTwoLoop and
+// CoderFast derive the cutoff from the bitrate alone
+// (aacenc.c:1592-1614 @ d09d5afc3a). At 48 kHz mono that yields, in Hz:
+//
+//	per channel      32k     64k    128k    192k
+//	CoderNMR       14000   16000   18666   20000
+//	TwoLoop/Fast    9500   16000   20000   22000
+//
+// So a twoloop stream keeps more highs than an NMR stream at high bitrates but
+// distinctly fewer at low ones, which is visible on a spectrogram as a
+// different shelf. Set Cutoff explicitly if the coding bandwidth has to stay
+// stable across coders.
 type Coder int
 
 // Quantizer search strategies.
