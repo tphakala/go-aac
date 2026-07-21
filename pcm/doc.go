@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Package pcm is the high-level PCM streaming API for go-aac: interleaved
-// little-endian integer PCM in via io.Writer, an AAC-LC ADTS stream out.
+// little-endian integer PCM in, an AAC-LC ADTS stream out via io.Writer
+// (Encoder), or raw access units out through a callback for muxing into MP4
+// (FrameEncoder). It also decodes AAC-LC back to PCM (Decoder).
 //
 // It is shaped exactly like go-flac's pcm package and go-opus' oggopus
 // package, so a consumer can switch between the three encoders with the
@@ -39,16 +41,49 @@
 //
 //	err := aacpcm.EncodeInterleaved(w, cfg, pcmBytes)
 //
+// # Muxing into MP4
+//
+// A caller putting AAC-LC into MP4 or fragmented MP4 (CMAF) needs the
+// opposite of ADTS: raw access units, with their boundaries reported out of
+// band. FrameEncoder is that path, and it is the same pipeline as Encoder,
+// so the access units are byte-identical to the ADTS stream's payloads:
+//
+//	fe, err := aacpcm.NewFrameEncoder(cfg)
+//	emit := func(au []byte, samples int) error {
+//	    segment = append(segment, au...) // au is borrowed; copy or append
+//	    return nil
+//	}
+//	err = fe.EncodeInterleaved(pcm, emit)
+//	err = fe.Flush(emit) // drains the priming frame; without it the tail is lost
+//
+// FrameEncoder.AudioSpecificConfig is the esds DecoderSpecificInfo, valid
+// before any audio is encoded so an init segment can be built up front, and
+// FrameEncoder.Delay is the priming count for the edit list media_time. The
+// emit callback has the same shape as go-flac's pcm.FrameEncoder, so a muxer's
+// per-unit path is shared between the two codecs; the lifecycle differs, since
+// AAC-LC needs a Flush to drain the priming frame where the FLAC frame encoder
+// is one-shot.
+//
+// Note the two spellings of EncodeInterleaved: the package-level function is
+// the one-shot ADTS helper below, while FrameEncoder.EncodeInterleaved is the
+// streaming raw-access-unit method used here.
+//
+// Every access unit decodes to aac.FrameSize samples, which is what a trun
+// sample_duration carries. That is also why sample-accurate trimming needs
+// one number the encoder does not have: the caller feeding the PCM tracks the
+// true input sample count and gives it to the muxer as the edit list segment
+// duration, since the reported per-unit count cannot distinguish the padding
+// in a short final frame.
+//
 // # Gapless playback
 //
 // ADTS cannot signal the encoder delay (aac.EncoderDelay priming samples) or
 // the final-frame padding, so decoders emit roughly aac.EncoderDelay extra
 // leading samples and up to 1023 trailing ones. Every AAC-in-ADTS stream in
 // the world behaves this way; players compensate or ignore it. Compute clip
-// durations from the source PCM, not from decoded AAC length. For
-// sample-accurate trimming a container with an edit list (MP4) is
-// required, which is out of scope for v1; the low-level aac package plus
-// an external muxer is the escape hatch.
+// durations from the source PCM, not from decoded AAC length. Sample-accurate
+// trimming needs a container with an edit list: use FrameEncoder with an MP4
+// muxer such as go-m4a.
 //
 // # Decoding
 //
@@ -84,7 +119,7 @@
 //
 // # Concurrency
 //
-// An Encoder is not safe for concurrent use; use one per goroutine.
-// EncodeInterleaved is safe for concurrent use. A Decoder is likewise not safe
-// for concurrent use.
+// An Encoder is not safe for concurrent use; use one per goroutine, and the
+// same holds for a FrameEncoder and a Decoder. The package-level
+// EncodeInterleaved function is safe for concurrent use.
 package pcm

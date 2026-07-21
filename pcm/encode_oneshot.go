@@ -35,9 +35,7 @@ func EncodeInterleaved(w io.Writer, cfg Config, pcm []byte) error {
 	}
 	e, _ := encoderPool.Get().(*Encoder)
 	defer func() {
-		// Drop the reference to the caller's sink so an idle pooled encoder
-		// does not pin it; the next Reset rebinds w before any use.
-		e.w = nil
+		e.release() // never hand a pooled encoder back holding caller state
 		encoderPool.Put(e)
 	}()
 	if err := e.Reset(w, cfg); err != nil {

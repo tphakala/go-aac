@@ -13,7 +13,7 @@ func BenchmarkConvert(b *testing.B) {
 		for _, depth := range []int{16, 32} {
 			name := map[int]string{1: "mono", 2: "stereo"}[ch]
 			b.Run(name+"_s"+map[int]string{16: "16", 32: "32"}[depth], func(b *testing.B) {
-				e := &Encoder{cfg: Config{SampleRate: 48000, BitDepth: depth, Channels: ch}}
+				e := &FrameEncoder{cfg: Config{SampleRate: 48000, BitDepth: depth, Channels: ch}}
 				chunk := make([]byte, n*ch*depth/8)
 				for i := range chunk {
 					chunk[i] = byte(i * 7)

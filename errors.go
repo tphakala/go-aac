@@ -12,9 +12,12 @@ var (
 	// the C encoder's spectral coefficient guard (aacenc.c:1119-1124
 	// @ d09d5afc3a) to a testable sentinel.
 	ErrInvalidAudio = errors.New("go-aac: input contains NaN or Inf")
-	// ErrEncoderClosed is returned by pcm.Encoder.Write and Close after Close
-	// has been called, and by the aac.Encoder and pcm.Encoder methods when the
-	// encoder is uninitialized: a zero value, or one left unusable by a failed
-	// Reset.
+	// ErrEncoderClosed is returned by pcm.Encoder.Write after Close and by
+	// pcm.FrameEncoder.EncodeInterleaved after Flush; Close and Flush are
+	// themselves idempotent and re-report the outcome of the flush they
+	// performed, so neither returns this error on a stream that ended
+	// cleanly. It is also returned by the aac.Encoder, pcm.Encoder and
+	// pcm.FrameEncoder methods when the encoder is uninitialized: a zero
+	// value, or one left unusable by a failed Reset.
 	ErrEncoderClosed = errors.New("go-aac: encoder is closed")
 )

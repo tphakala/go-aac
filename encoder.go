@@ -249,9 +249,10 @@ func (e *Encoder) Reset(cfg EncoderConfig) error {
 // concatenating raw access units produces a byte stream no decoder
 // accepts. Wrap each access unit in an ADTS header (AppendADTSHeader), or
 // mux the access units into a container (MP4/M4A) using
-// AudioSpecificConfig for the decoder configuration. The pcm package does
-// the ADTS framing automatically and is the right layer for almost all
-// callers.
+// AudioSpecificConfig for the decoder configuration. The pcm package is the
+// right layer for almost all callers either way: pcm.Encoder does the ADTS
+// framing automatically, and pcm.FrameEncoder reports raw access units for a
+// muxer, both from interleaved integer PCM.
 //
 // The encoder delays output by one frame (encoder priming): the first call
 // appends nothing. This shifts the decoded output later by EncoderDelay samples

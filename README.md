@@ -88,8 +88,9 @@ The library has two layers, mirroring [go-flac](https://github.com/tphakala/go-f
 
 ### pcm: the streaming layer
 
-Interleaved little-endian integer PCM in via `io.Writer`, a self-framing ADTS
-stream out. This is the right entry point for almost all callers.
+Interleaved little-endian integer PCM in, a self-framing ADTS stream out via
+`io.Writer`, or raw access units out through a callback for muxing. This is the
+right entry point for almost all callers.
 
 ```go
 import aacpcm "github.com/tphakala/go-aac/pcm"
@@ -112,6 +113,28 @@ sample stride.
 The package name deliberately collides with `go-flac/pcm`; import it with an
 alias (`aacpcm`), which is ordinary Go practice and lets a consumer switch
 between the two encoders with the same call shape.
+
+Muxing into MP4 or fragmented MP4 (CMAF) needs the opposite of ADTS: raw access
+units, boundaries reported out of band. `FrameEncoder` is that path, and it is
+the same pipeline, so the units are byte-identical to the ADTS stream's
+payloads.
+
+```go
+fe, err := aacpcm.NewFrameEncoder(cfg)
+asc := fe.AudioSpecificConfig() // esds DecoderSpecificInfo, valid before any audio
+_ = asc                         // goes in the init segment's esds box
+emit := func(au []byte, samples int) error {
+    segment = append(segment, au...) // au is borrowed; copy or append
+    return nil
+}
+err = fe.EncodeInterleaved(pcm, emit)
+err = fe.Flush(emit) // drains the priming frame; fe.Delay() is the elst media_time
+```
+
+The emit callback has the same shape as go-flac's `pcm.FrameEncoder`, so a
+muxer's per-unit path is shared between the two codecs; the lifecycle differs,
+since AAC-LC needs a `Flush` to drain the priming frame where the FLAC frame
+encoder is one-shot.
 
 Decoding mirrors go-flac's `pcm.Decoder`: an AAC-LC stream in via `io.Reader`,
 interleaved little-endian S16 PCM out.
@@ -145,6 +168,8 @@ au, err := e.EncodeFrame(au[:0], [][]float32{frame}) // up to aac.FrameSize (102
 
 Raw access units are not self-framing. Use `aac.AppendADTSHeader` to build a
 streamable ADTS stream, or `Encoder.AudioSpecificConfig` to mux them elsewhere.
+Most muxing callers want `pcm.FrameEncoder` instead, which does the conversion,
+framing and priming for them.
 
 ## Gapless playback
 
@@ -153,9 +178,10 @@ samples, and every AAC-in-ADTS stream behaves this way. Compute clip durations
 from the source PCM, not from the decoded AAC length.
 
 For gapless, sample-accurate output, mux into a container that carries an edit
-list. [go-m4a](https://github.com/tphakala/go-m4a) is the pure-Go MP4/M4A muxer
+list, feeding the muxer from `pcm.FrameEncoder`.
+[go-m4a](https://github.com/tphakala/go-m4a) is the pure-Go MP4/M4A muxer
 and demuxer that pairs with go-aac for exactly this: it writes the encoder
-priming (`aac.EncoderDelay`, also `Encoder.Delay`) into an `elst` edit list so
+priming (`aac.EncoderDelay`, also `pcm.FrameEncoder.Delay`) into an `elst` edit list so
 playback is gapless, and reads `.m4a` files back into access units. Its
 `aacm4a` subpackage is a one-call bridge over go-aac, PCM to `.m4a` and back.
 No cgo and no external binaries.
