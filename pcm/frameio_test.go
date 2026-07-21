@@ -754,6 +754,15 @@ func TestEncoderFailedResetIsUnusable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var e Encoder
+			// Arm it against a real sink first, so the failed Reset below has a
+			// previous stream to detach from.
+			var prior bytes.Buffer
+			if err := e.Reset(&prior, good); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.Write(genPCM16(2048, good.Channels)); err != nil {
+				t.Fatal(err)
+			}
 			if err := tc.fail(&e); err == nil {
 				t.Fatal("Reset accepted an invalid argument")
 			}
@@ -765,6 +774,9 @@ func TestEncoderFailedResetIsUnusable(t *testing.T) {
 			}
 			if got := e.AudioSpecificConfig(); got != nil {
 				t.Errorf("AudioSpecificConfig after a failed Reset = %x, want nil", got)
+			}
+			if e.w != nil {
+				t.Error("a failed Reset left the previous sink attached; it stays pinned until the next success")
 			}
 			// The encoder is still reusable once a Reset succeeds.
 			var buf bytes.Buffer

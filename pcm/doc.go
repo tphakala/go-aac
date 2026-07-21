@@ -58,7 +58,10 @@
 //
 // FrameEncoder.AudioSpecificConfig is the esds DecoderSpecificInfo, valid
 // before any audio is encoded so an init segment can be built up front, and
-// FrameEncoder.Delay is the priming count for the edit list media_time. The
+// FrameEncoder.Delay is the priming count for the edit list media_time. Both
+// it and the per-unit samples count are PCM samples per channel, so a muxer
+// whose track timescale is not the sample rate (the usual choice for audio)
+// scales them into media-timescale ticks first. The
 // emit callback has the same shape as go-flac's pcm.FrameEncoder, so a muxer's
 // per-unit path is shared between the two codecs; the lifecycle differs, since
 // AAC-LC needs a Flush to drain the priming frame where the FLAC frame encoder
@@ -69,7 +72,7 @@
 // streaming raw-access-unit method used here.
 //
 // Every access unit decodes to aac.FrameSize samples, which is what a trun
-// sample_duration carries. That is also why sample-accurate trimming needs
+// sample_duration carries once converted to the track timescale. That is also why sample-accurate trimming needs
 // one number the encoder does not have: the caller feeding the PCM tracks the
 // true input sample count and gives it to the muxer as the edit list segment
 // duration, since the reported per-unit count cannot distinguish the padding

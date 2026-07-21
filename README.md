@@ -128,8 +128,12 @@ emit := func(au []byte, samples int) error {
     return nil
 }
 err = fe.EncodeInterleaved(pcm, emit)
-err = fe.Flush(emit) // drains the priming frame; fe.Delay() is the elst media_time
+err = fe.Flush(emit) // drains the priming frame; fe.Delay() gives the elst media_time
 ```
+
+`Delay()` and the per-unit `samples` count are both PCM samples per channel, so
+a muxer whose track timescale is not the sample rate scales them into
+media-timescale ticks first.
 
 The emit callback has the same shape as go-flac's `pcm.FrameEncoder`, so a
 muxer's per-unit path is shared between the two codecs; the lifecycle differs,

@@ -59,13 +59,14 @@ func NewEncoder(w io.Writer, cfg Config) (*Encoder, error) {
 // Reset may be called on a closed encoder, which is the usual pooling
 // pattern (Reset, Write, Close, repeat).
 func (e *Encoder) Reset(w io.Writer, cfg Config) error {
+	// Detach from the previous stream before rebinding, so every failure path
+	// below leaves the encoder unconfigured AND holding no reference to the
+	// sink it was replacing, rather than pinning it until the next success.
+	e.release()
 	if w == nil {
-		// Leave the encoder unconfigured, so a partially reset Encoder refuses
-		// Write rather than continuing on the previous stream's sink.
-		e.fe.disarm()
 		return fmt.Errorf("go-aac/pcm: nil writer")
 	}
-	if err := e.fe.Reset(cfg); err != nil { // Reset disarms before validating
+	if err := e.fe.Reset(cfg); err != nil { // Reset disarms again before validating
 		return err
 	}
 	e.w = w
@@ -130,11 +131,11 @@ func (e *Encoder) AudioSpecificConfig() []byte {
 }
 
 // release drops every reference to the caller's stream and disarms the
-// encoder. It backs the pooled EncodeInterleaved teardown: an idle encoder
-// sitting in the pool must pin neither the caller's sink nor a latched error
-// (which wraps whatever that sink put in it), and must not be able to encode
-// into the released sink should any future path reach Write before the next
-// Reset re-arms it.
+// encoder. It backs both the pooled EncodeInterleaved teardown and the head of
+// Reset: an encoder that is idle in the pool, or whose Reset failed, must pin
+// neither the caller's sink nor a latched error (which wraps whatever that
+// sink put in it), and must not be able to encode into the released sink
+// should any future path reach Write before the next Reset re-arms it.
 func (e *Encoder) release() {
 	e.w = nil
 	e.fe.disarm()

@@ -75,7 +75,9 @@ func ExampleNewFrameEncoder() {
 	emit := func(au []byte, samples int) error {
 		segment = append(segment, au...) // copy: au is only valid until this returns
 		sizes = append(sizes, len(au))
-		_ = samples // always 1024 for AAC-LC: the trun sample_duration
+		// samples is the decoded length in PCM samples per channel, always
+		// 1024 for AAC-LC; scale it to the track timescale for trun.
+		_ = samples
 		return nil
 	}
 
@@ -87,9 +89,12 @@ func ExampleNewFrameEncoder() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("ASC %x, delay %d samples, %d access units in %d bytes\n",
-		asc, fe.Delay(), len(sizes), len(segment))
-	// Output: ASC 1188, delay 1024 samples, 48 access units in 192 bytes
+	// The encoded size is deliberately not printed: it tracks rate-control
+	// decisions, and pinning it here would make this example churn on any
+	// bitstream tweak. TestFrameEncoderGoldenAccessUnits is the bitstream anchor.
+	fmt.Printf("ASC %x, delay %d samples, %d access units\n",
+		asc, fe.Delay(), len(sizes))
+	// Output: ASC 1188, delay 1024 samples, 48 access units
 }
 
 // ExampleNewEncoder streams PCM of unknown length to any io.Writer; no
