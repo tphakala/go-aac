@@ -51,6 +51,52 @@ func ExampleEncodeInterleaved() {
 	// Output: 48 ADTS frames
 }
 
+// ExampleNewFrameEncoder collects raw access units for a muxer instead of
+// writing a framed stream: the shape a fragmented-MP4 (CMAF) segmenter
+// consumes for live HLS. The access unit is borrowed, so the segment
+// buffer appends it rather than retaining the slice.
+func ExampleNewFrameEncoder() {
+	fe, err := aacpcm.NewFrameEncoder(aacpcm.Config{
+		SampleRate: 48000,
+		BitDepth:   16,
+		Channels:   1,
+		Bitrate:    96000,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The init segment's esds DecoderSpecificInfo and the edit list priming
+	// count are both available before any audio is encoded.
+	asc := fe.AudioSpecificConfig()
+
+	var segment []byte // one CMAF segment's mdat payload
+	var sizes []int    // per-sample sizes for the trun box
+	emit := func(au []byte, samples int) error {
+		segment = append(segment, au...) // copy: au is only valid until this returns
+		sizes = append(sizes, len(au))
+		// samples is the decoded length in PCM samples per channel, always
+		// 1024 for AAC-LC; scale it to the track timescale for trun.
+		_ = samples
+		return nil
+	}
+
+	pcm := make([]byte, 48000*2) // one second of silent 16-bit mono PCM
+	if err := fe.EncodeInterleaved(pcm, emit); err != nil {
+		log.Fatal(err)
+	}
+	if err := fe.Flush(emit); err != nil {
+		log.Fatal(err)
+	}
+
+	// The encoded size is deliberately not printed: it tracks rate-control
+	// decisions, and pinning it here would make this example churn on any
+	// bitstream tweak. TestFrameEncoderGoldenAccessUnits is the bitstream anchor.
+	fmt.Printf("ASC %x, delay %d samples, %d access units\n",
+		asc, fe.Delay(), len(sizes))
+	// Output: ASC 1188, delay 1024 samples, 48 access units
+}
+
 // ExampleNewEncoder streams PCM of unknown length to any io.Writer; no
 // seeking and no finalization beyond Close are ever needed.
 func ExampleNewEncoder() {

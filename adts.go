@@ -35,8 +35,9 @@ func AppendADTSHeader(dst []byte, sampleRate, channels, payloadLen int) ([]byte,
 // of payloadLen bytes. Mirrors libavformat/adtsenc.c:adts_write_frame_header
 // @ d09d5afc3a: MPEG-4 ID, layer 0, no CRC, profile AAC-LC (object type 2,
 // coded as 1), buffer fullness 0x7ff (VBR sentinel), one raw data block.
-// The 13-bit frame length field caps payloadLen at 8184; the encoder's
-// 6144-bits-per-channel bound keeps real frames far below that.
+// The 13-bit frame length field caps payloadLen at 8184, which is the only
+// enforced limit; the encoder's rate control steers toward 6144 bits per
+// channel, keeping real frames far below it.
 func appendADTSHeader(dst []byte, srIndex, chanConfig, payloadLen int) []byte {
 	frameLen := payloadLen + adtsHeaderSize
 	return append(dst,

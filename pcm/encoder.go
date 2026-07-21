@@ -3,7 +3,6 @@
 package pcm
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -23,25 +22,20 @@ var _ io.WriteCloser = (*Encoder)(nil)
 // ADTS is self-framing (one 7-byte header per 1024-sample frame), so the
 // Encoder is correct on a plain io.Writer with no seeking, no length known
 // up front and no finalization step; Close only drains buffered samples.
+// A caller muxing into MP4 instead of writing a stream wants the raw access
+// units: use FrameEncoder, which Encoder is built on.
 //
-// An Encoder is not safe for concurrent use.
+// An Encoder is not safe for concurrent use, and must not be copied after
+// first use: a copy shares the codec state and the scratch buffers with the
+// original.
 type Encoder struct {
+	// fe holds the whole encoding pipeline: carry buffer, integer to
+	// float32 conversion, framing, priming and drain. Encoder adds only
+	// the ADTS framing and the sink.
+	fe FrameEncoder
+
 	w   io.Writer
-	cfg Config
-
-	enc *aac.Encoder // nil only on a zero value or after a failed Reset
-
-	bytesPS    int    // bytes per sample per channel (BitDepth / 8)
-	stride     int    // bytes per inter-channel sample (bytesPS * channels)
-	frameBytes int    // bytes in one full 1024-sample frame (stride * FrameSize)
-	carry      []byte // buffered PCM bytes not yet a full frame (bounded to one frame)
-	planar     [2][aac.FrameSize]float32
-	frames     [2][]float32 // slice headers into planar, resliced per frame
-	au         []byte       // raw access unit scratch, reused
-	out        []byte       // ADTS frame scratch (header + access unit), reused
-
-	closed bool
-	err    error // latched on the first Write or Close failure; returned until Reset
+	out []byte // ADTS frame scratch (header + access unit), reused
 }
 
 // NewEncoder validates cfg and returns an Encoder writing an ADTS stream
@@ -65,40 +59,20 @@ func NewEncoder(w io.Writer, cfg Config) (*Encoder, error) {
 // Reset may be called on a closed encoder, which is the usual pooling
 // pattern (Reset, Write, Close, repeat).
 func (e *Encoder) Reset(w io.Writer, cfg Config) error {
-	e.closed = true // a partially reset encoder must refuse Write
-	e.err = nil     // clear any latched terminal error from the previous stream
+	// Detach from the previous stream before rebinding, so every failure path
+	// below leaves the encoder unconfigured AND holding no reference to the
+	// sink it was replacing, rather than pinning it until the next success.
+	e.release()
 	if w == nil {
 		return fmt.Errorf("go-aac/pcm: nil writer")
 	}
-	if err := cfg.validate(); err != nil {
-		return err
-	}
-	if e.enc == nil {
-		enc, err := aac.NewEncoder(cfg.encoderConfig())
-		if err != nil {
-			return err
-		}
-		e.enc = enc
-	} else if err := e.enc.Reset(cfg.encoderConfig()); err != nil {
-		e.enc = nil
+	if err := e.fe.Reset(cfg); err != nil { // Reset disarms again before validating
 		return err
 	}
 	e.w = w
-	e.cfg = cfg
-	e.bytesPS = cfg.BitDepth / 8
-	e.stride = e.bytesPS * cfg.Channels
-	e.frameBytes = e.stride * aac.FrameSize
-	e.carry = e.carry[:0]
-	for ch := range cfg.Channels {
-		e.frames[ch] = e.planar[ch][:]
-	}
-	if e.au == nil {
-		e.au = make([]byte, 0, 6144/8*2)
-	}
 	if e.out == nil {
-		e.out = make([]byte, 0, 6144/8*2+adtsHeaderLen)
+		e.out = make([]byte, 0, maxAUBytes+adtsHeaderLen)
 	}
-	e.closed = false
 	return nil
 }
 
@@ -115,122 +89,27 @@ const adtsHeaderLen = 7
 // it returns the number of bytes of p that were durably consumed
 // (io.Writer contract).
 func (e *Encoder) Write(p []byte) (int, error) {
-	if e.err != nil {
-		return 0, e.err
-	}
-	if e.closed || e.enc == nil {
-		return 0, aac.ErrEncoderClosed
-	}
-	total := len(p)
-
-	// 1. Top off the carry to a full frame from the front of p.
-	if len(e.carry) > 0 {
-		need := e.frameBytes - len(e.carry) // >= 1: carry is always < one frame
-		if len(p) < need {                  // still short of a full frame
-			e.carry = append(e.carry, p...)
-			return total, nil
-		}
-		e.carry = append(e.carry, p[:need]...)
-		if err := e.encodeFrameBytes(e.carry); err != nil {
-			return 0, e.fail(err)
-		}
-		e.carry = e.carry[:0]
-		p = p[need:]
-	}
-
-	// 2. Encode whole frames straight from p, no copy.
-	for len(p) >= e.frameBytes {
-		if err := e.encodeFrameBytes(p[:e.frameBytes]); err != nil {
-			return total - len(p), e.fail(err)
-		}
-		p = p[e.frameBytes:]
-	}
-
-	// 3. Stash the sub-frame remainder (which may include a partial
-	// sample; Write is byte-oriented) for next time.
-	e.carry = append(e.carry, p...)
-	return total, nil
+	return e.fe.encode(p, e.writeAU)
 }
 
-// encodeFrameBytes converts one full frame of interleaved PCM bytes to
-// planar float32, encodes it and writes the ADTS-framed result (if any;
-// the priming frame produces none) to the sink. chunk holds exactly
-// frameBytes bytes.
-func (e *Encoder) encodeFrameBytes(chunk []byte) error {
-	e.convert(chunk, aac.FrameSize)
-	return e.encodeFrame(aac.FrameSize)
-}
-
-// encodeFrame encodes planar[:n] and writes the framed access unit.
-func (e *Encoder) encodeFrame(n int) error {
-	for ch := range e.cfg.Channels {
-		e.frames[ch] = e.planar[ch][:n]
-	}
+// writeAU wraps one access unit in an ADTS header and writes header plus
+// payload to the sink in a single Write. It is the emit callback the
+// FrameEncoder core calls per access unit; the samples count is implicit in
+// ADTS, so it is ignored. Write and Close pass it as a method value rather
+// than caching one, which costs no allocation because the core never lets the
+// callback escape, and which keeps a copied Encoder from writing to the
+// original's sink.
+func (e *Encoder) writeAU(au []byte, _ int) error {
 	var err error
-	e.au, err = e.enc.EncodeFrame(e.au[:0], e.frames[:e.cfg.Channels])
-	if err != nil {
-		return err
-	}
-	return e.writeAU()
-}
-
-// writeAU wraps the pending access unit in an ADTS header and writes
-// header plus payload to the sink in a single Write. An empty access unit
-// (the priming frame, or an exhausted drain) writes nothing.
-func (e *Encoder) writeAU() error {
-	if len(e.au) == 0 {
-		return nil
-	}
-	var err error
-	e.out, err = aac.AppendADTSHeader(e.out[:0], e.cfg.SampleRate, e.cfg.Channels, len(e.au))
+	e.out, err = aac.AppendADTSHeader(e.out[:0], e.fe.cfg.SampleRate, e.fe.cfg.Channels, len(au))
 	if err != nil {
 		return fmt.Errorf("go-aac/pcm: %w", err)
 	}
-	e.out = append(e.out, e.au...)
+	e.out = append(e.out, au...)
 	if _, err := e.w.Write(e.out); err != nil {
 		return err
 	}
 	return nil
-}
-
-// convert deinterleaves and scales n input samples from chunk into the
-// planar float32 buffers. The scale factors mirror FFmpeg's integer to
-// fltp sample conversion (1/32768 for 16-bit and the 24/32-bit
-// equivalents), so the low-level encoder sees exactly the values the C
-// encoder would.
-func (e *Encoder) convert(chunk []byte, n int) {
-	ch := e.cfg.Channels
-	switch e.cfg.BitDepth {
-	case 16:
-		const scale = 1.0 / (1 << 15)
-		for c := range ch {
-			dst := e.planar[c][:n]
-			for i := range n {
-				v := int16(binary.LittleEndian.Uint16(chunk[(i*ch+c)*2:]))
-				dst[i] = float32(v) * scale
-			}
-		}
-	case 24:
-		const scale = 1.0 / (1 << 23)
-		for c := range ch {
-			dst := e.planar[c][:n]
-			for i := range n {
-				o := (i*ch + c) * 3
-				v := int32(chunk[o]) | int32(chunk[o+1])<<8 | int32(chunk[o+2])<<16
-				v = (v << 8) >> 8 // sign-extend 24 bits
-				dst[i] = float32(v) * scale
-			}
-		}
-	case 32:
-		const scale = 1.0 / (1 << 31)
-		for c := range ch {
-			dst := e.planar[c][:n]
-			for i := range n {
-				v := int32(binary.LittleEndian.Uint32(chunk[(i*ch+c)*4:]))
-				dst[i] = float32(v) * scale
-			}
-		}
-	}
 }
 
 // Close encodes the final partial frame (zero-padded to a whole frame by
@@ -240,74 +119,33 @@ func (e *Encoder) convert(chunk []byte, n int) {
 // ErrEncoderClosed. It errors if buffered trailing bytes are not a whole
 // number of inter-channel samples.
 func (e *Encoder) Close() error {
-	if e.closed {
-		// Report the latched outcome on every later call, so a failure during
-		// the final flush is not masked by a success on retry.
-		return e.err
-	}
-	e.closed = true
-	if e.err != nil {
-		return e.err // a prior Write already broke the stream; nothing to flush
-	}
-	e.err = e.finish()
-	return e.err
-}
-
-// fail latches err as the encoder's terminal error. encodeFrameBytes advances
-// the codec state before writeAU can fail, so the failed access unit cannot be
-// recovered by re-feeding PCM: every later Write and Close returns this error
-// until Reset re-arms the encoder. Returns the latched error for convenience.
-func (e *Encoder) fail(err error) error {
-	if e.err == nil {
-		e.err = err
-	}
-	return e.err
-}
-
-// finish flushes the trailing partial frame and drains the encoder delay. It
-// backs Close, which records its result so repeat calls are idempotent.
-func (e *Encoder) finish() error {
-	if e.enc == nil {
-		return aac.ErrEncoderClosed
-	}
-
-	if len(e.carry) > 0 {
-		if len(e.carry)%e.stride != 0 {
-			return fmt.Errorf("go-aac/pcm: %d trailing bytes are not a whole number of %d-byte samples", len(e.carry), e.stride)
-		}
-		n := len(e.carry) / e.stride
-		e.convert(e.carry, n)
-		if err := e.encodeFrame(n); err != nil {
-			return err
-		}
-		e.carry = e.carry[:0]
-	}
-
-	// Drain the encoder delay: each nil call yields one access unit until
-	// the queue is empty. A stream with no input at all still drains to
-	// one all-silence frame, so Close always leaves a decodable stream.
-	for !e.enc.Drained() {
-		var err error
-		e.au, err = e.enc.EncodeFrame(e.au[:0], nil)
-		if err != nil {
-			return err
-		}
-		if err := e.writeAU(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return e.fe.Flush(e.writeAU)
 }
 
 // AudioSpecificConfig returns the MPEG-4 AudioSpecificConfig for this
-// stream (2 bytes for AAC-LC), the decoder configuration a future MP4/M4A
-// muxing layer needs. Valid after NewEncoder or Reset. It returns a fresh
-// copy on every call; callers may retain or mutate it freely.
+// stream (2 bytes for AAC-LC), the decoder configuration an MP4/M4A muxing
+// layer needs. Valid after NewEncoder or Reset. It returns a fresh copy on
+// every call; callers may retain or mutate it freely.
 func (e *Encoder) AudioSpecificConfig() []byte {
-	if e.enc == nil {
-		return nil
-	}
-	return e.enc.AudioSpecificConfig()
+	return e.fe.AudioSpecificConfig()
+}
+
+// release drops every reference to the caller's stream and disarms the
+// encoder. It backs both the pooled EncodeInterleaved teardown and the head of
+// Reset: an encoder that is idle in the pool, or whose Reset failed, must pin
+// neither the caller's sink nor a latched error (which wraps whatever that
+// sink put in it), and must not be able to encode into the released sink
+// should any future path reach Write before the next Reset re-arms it.
+func (e *Encoder) release() {
+	e.w = nil
+	e.fe.disarm()
+}
+
+// Delay reports the encoder priming delay in samples per channel, the leading
+// samples a muxer trims. ADTS cannot signal it, so it matters only to a caller
+// that also muxes the same audio into a container; see FrameEncoder.Delay.
+func (e *Encoder) Delay() int {
+	return e.fe.Delay()
 }
 
 // Stats returns a snapshot of encoder tool usage (frames, short blocks,
@@ -315,8 +153,5 @@ func (e *Encoder) AudioSpecificConfig() []byte {
 // encoder prints at uninit. Call it after Close for whole-stream numbers;
 // Reset clears it.
 func (e *Encoder) Stats() aac.Stats {
-	if e.enc == nil {
-		return aac.Stats{}
-	}
-	return e.enc.Stats()
+	return e.fe.Stats()
 }

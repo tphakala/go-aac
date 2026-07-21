@@ -16,7 +16,8 @@
 //     self-framing; see EncodeFrame.
 //   - Package pcm is the streaming layer and the right entry point for
 //     almost all callers: interleaved little-endian integer PCM in via
-//     io.Writer, a self-framing ADTS stream out.
+//     io.Writer, a self-framing ADTS stream out, or raw access units
+//     through a callback for muxing (pcm.FrameEncoder).
 //
 // An Encoder is not safe for concurrent use; use one per goroutine. The
 // package has no mutable global state, so any number of encoders run in
