@@ -16,7 +16,11 @@ Approach), so the pieces marked done are done in the strong sense.
 
 - **Encoder: complete for AAC-LC.** All three FFmpeg coders (NMR, twoloop,
   fast), all four coding tools (TNS, PNS, M/S, I/S), mono and stereo, 44.1 and
-  48 kHz, ADTS output. The NMR coder is the default, as it is upstream.
+  48 kHz, ADTS output. The NMR coder is the default, as it is upstream at the
+  pin (`aac_coder` is `AAC_CODER_NMR`, and the commit that made it so says the
+  old coders will soon be removed). FFmpeg's own released docs still describe
+  the older set, in which `twoloop` is the default and `anmr` is a different,
+  experimental coder; that text is stale, not a contradiction.
 - **Decoder: usable for AAC-LC.** Pure fixed point, producing output identical
   to `ffmpeg -c:a aac_fixed` at the sample level. The public `pcm.NewDecoder`
   streams an ADTS (or raw plus ASC) AAC-LC stream to interleaved little-endian

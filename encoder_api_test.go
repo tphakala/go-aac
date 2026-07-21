@@ -190,6 +190,37 @@ func TestEncoderResetByteIdentity(t *testing.T) {
 	}
 }
 
+// TestDefaultBitrateIsTheZeroValueTarget pins the exported constant to the
+// behaviour it documents: leaving Bitrate zero must encode exactly as though
+// the caller had passed DefaultBitrate. A caller that pre-sizes a buffer from
+// DefaultBitrate depends on this, so drift between the two has to break here.
+func TestDefaultBitrateIsTheZeroValueTarget(t *testing.T) {
+	encode := func(bitrate int) []byte {
+		t.Helper()
+		e, err := NewEncoder(EncoderConfig{SampleRate: 48000, Channels: 1, Bitrate: bitrate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []byte
+		for i := range 20 {
+			if out, err = e.EncodeFrame(out, [][]float32{synthFrame(FrameSize, float64(i*FrameSize))}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for !e.Drained() {
+			if out, err = e.EncodeFrame(out, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out
+	}
+	implicit, explicit := encode(0), encode(DefaultBitrate)
+	if !bytes.Equal(implicit, explicit) {
+		t.Fatalf("Bitrate 0 and Bitrate DefaultBitrate (%d) differ: %d vs %d bytes",
+			DefaultBitrate, len(implicit), len(explicit))
+	}
+}
+
 // TestEncodeFrameSteadyStateAllocs is the low-level allocation gate: with
 // capacity in dst, EncodeFrame allocates nothing, for all three coders.
 func TestEncodeFrameSteadyStateAllocs(t *testing.T) {
