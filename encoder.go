@@ -30,25 +30,59 @@ const FrameSize = 1024
 // additional latency a particular decoder may add to its own output.
 const EncoderDelay = FrameSize
 
-// defaultBitrate is the target selected by EncoderConfig.Bitrate == 0.
-// Mirrors AV_CODEC_DEFAULT_BITRATE, the bit_rate FFmpeg's encoder receives
-// when the caller sets none (libavcodec/options_table.h:47 @ d09d5afc3a):
-// 200 kb/s total, regardless of channel count.
-const defaultBitrate = 200_000
+// DefaultBitrate is the ABR target selected when a config leaves Bitrate zero:
+// 200 kb/s for the whole stream, regardless of channel count. Mirrors
+// AV_CODEC_DEFAULT_BITRATE, the bit_rate FFmpeg's encoder receives when the
+// caller sets none (libavcodec/options_table.h:47 @ d09d5afc3a).
+//
+// It is exported so a caller that has to predict the encoded size, such as a
+// muxer pre-sizing a buffer, can read the value that will actually be used
+// instead of restating it and hoping it does not drift.
+const DefaultBitrate = 200_000
 
 // Coder selects the quantizer search strategy. The zero value is CoderNMR,
-// upstream's default. Mirrors enum AACCoder (libavcodec/aacenc.h
-// @ d09d5afc3a).
+// upstream's default at the pinned commit. Mirrors enum AACCoder
+// (libavcodec/aacenc.h @ d09d5afc3a).
+//
+// The constants are not ordered by speed, because speed is content dependent:
+// CoderTwoLoop is faster than CoderNMR on broadband material but several times
+// slower on tonal material. See each constant for the measurements.
+//
+// The coders also code to different bandwidths when Cutoff is 0. CoderNMR
+// takes FFmpeg's tuned rate-to-bandwidth table, about 20 kHz at 200 kb/s per
+// channel, while CoderTwoLoop and CoderFast fall through to
+// AAC_CUTOFF_FROM_BITRATE, about 22 kHz. So a twoloop stream keeps roughly
+// 2 kHz more highs than an NMR stream at the same bitrate, which is visible on
+// a spectrogram as a higher shelf and is faithful to upstream
+// (aacenc.c:1592-1614 @ d09d5afc3a).
 type Coder int
 
-// Quantizer search strategies, from best quality to fastest.
+// Quantizer search strategies.
 const (
-	// CoderNMR is the noise-to-mask-ratio trellis search, the upstream
-	// default and the best quality per bit.
+	// CoderNMR is the noise-to-mask-ratio scalefactor trellis, and the
+	// default here because it is the default upstream: aac_coder is
+	// {.i64 = AAC_CODER_NMR} at aacenc.c:1651 @ d09d5afc3a. Upstream also
+	// intends it to be the only coder, as the commit that made it the
+	// default (0efac66e7e) states the old coders will soon be removed.
+	//
+	// FFmpeg's released documentation describes an older coder set in which
+	// twoloop is the default and anmr is an experimental, lower quality
+	// coder. That text is stale relative to the code at the pin (doc/
+	// encoders.texi does not mention the nmr option at all), and anmr is a
+	// different coder from the nmr trellis ported here.
 	CoderNMR Coder = iota
-	// CoderTwoLoop is the ISO 13818-7 Appendix C two-loop search.
+	// CoderTwoLoop is the ISO 13818-7 Appendix C two-loop search. It is
+	// faster than CoderNMR on broadband material but several times slower
+	// on tonal material, where the rate and distortion loops fight each
+	// other and the search runs its full iteration budget every frame.
+	// Encoding 20 s of 48 kHz mono at the default bitrate took 244 ms
+	// against CoderNMR's 314 ms on broadband noise, but 1262 ms against
+	// 336 ms on a 1400 Hz tone.
 	CoderTwoLoop
-	// CoderFast is the constrained two-loop heuristic, the fastest.
+	// CoderFast is the constrained two-loop heuristic, which skips the
+	// more expensive adjustments. It was the fastest of the three on both
+	// broadband and tonal material in the measurements above (126 ms and
+	// 640 ms respectively).
 	CoderFast
 )
 
@@ -80,8 +114,7 @@ type EncoderConfig struct {
 	Channels int
 
 	// Bitrate is the ABR target in bits per second for the whole stream
-	// (all channels), e.g. 128000. Zero selects FFmpeg's default of
-	// 200 kb/s total. Targets above the AAC buffer model ceiling (6144
+	// (all channels), e.g. 128000. Zero selects DefaultBitrate. Targets above the AAC buffer model ceiling (6144
 	// bits per channel per 1024-sample frame) are clamped, exactly as the
 	// C encoder clamps them; negative targets are rejected.
 	Bitrate int
@@ -92,7 +125,9 @@ type EncoderConfig struct {
 	Cutoff int
 
 	// Coder selects the quantizer search. The zero value is CoderNMR,
-	// upstream's default and the recommended choice.
+	// upstream's default at the pin and the recommended choice. See Coder
+	// for how the alternatives differ in speed and coding bandwidth; note
+	// that speed is content dependent rather than a fixed ordering.
 	Coder Coder
 
 	// Tool switches are negative (Disable*) so the zero value enables
@@ -130,7 +165,7 @@ func (c EncoderConfig) internal() enc.Config {
 	kind, _ := c.Coder.kind()
 	bitrate := c.Bitrate
 	if bitrate == 0 {
-		bitrate = defaultBitrate
+		bitrate = DefaultBitrate
 	}
 	return enc.Config{
 		SampleRate: c.SampleRate,

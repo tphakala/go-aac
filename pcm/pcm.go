@@ -23,8 +23,8 @@ type Config struct {
 	Channels int
 
 	// Bitrate is the ABR target in bits per second for the whole stream
-	// (all channels), e.g. 128000. Zero selects FFmpeg's default of
-	// 200 kb/s total. Targets above the AAC buffer model ceiling (6144
+	// (all channels), e.g. 128000. Zero selects aac.DefaultBitrate.
+	// Targets above the AAC buffer model ceiling (6144
 	// bits per channel per 1024-sample frame) are clamped, exactly as the
 	// C encoder clamps them; negative targets are rejected.
 	Bitrate int
@@ -35,10 +35,14 @@ type Config struct {
 	Cutoff int
 
 	// Coder selects the quantizer search strategy. The zero value is
-	// aac.CoderNMR, the noise-to-mask-ratio trellis search that gives the
-	// best quality per bit (the current behaviour). aac.CoderTwoLoop and
-	// aac.CoderFast trade some quality for speed, with CoderFast the
-	// fastest.
+	// aac.CoderNMR, the noise-to-mask-ratio scalefactor trellis and
+	// upstream's default at the pin.
+	//
+	// The alternatives are not simply "faster and cheaper": aac.CoderFast
+	// is the fastest on any material, but aac.CoderTwoLoop is faster than
+	// aac.CoderNMR only on broadband material and is several times slower
+	// on tonal material. The coders also code to slightly different
+	// bandwidths when Cutoff is 0. See aac.Coder for the measurements.
 	Coder aac.Coder
 }
 
@@ -75,8 +79,8 @@ func (c Config) validate() error {
 }
 
 // encoderConfig maps a pcm Config onto the low-level encoder config. The
-// coder comes from Config.Coder (zero value aac.CoderNMR, upstream's
-// default and the best quality per bit); every tool stays enabled, as the
+// coder comes from Config.Coder (zero value aac.CoderNMR, upstream's default
+// at the pin); every tool stays enabled, as the
 // individual tool switches are a low-level aac option not exposed here.
 func (c Config) encoderConfig() aac.EncoderConfig {
 	return aac.EncoderConfig{
