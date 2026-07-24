@@ -265,9 +265,10 @@ AbsPow34 held at its scalar kernel) and the full tagged build, `benchstat` over
 3.173 s per `BenchmarkEncodeFrames` pass over a 120 s recording, so 13.6% and
 14.6% against the scalar. Those seconds time the codec alone in a warm loop, so
 they do not correspond to the realtime multiples in the `bench-encoders.sh`
-table above, which are whole-process wall clock and predate the scalar-path work
-since; that table is due a re-run. Both kernels are byte-identical to the scalar
-port, so the tag is a pure speed knob with no effect on output.
+table above, which are whole-process wall clock and have not been re-measured
+since the scalar-path optimizations landed (#57). Both kernels are
+byte-identical to the scalar port, so the tag is a pure speed knob with no
+effect on output.
 
 The default build stays pure Go, with no assembly in the binary and the `simd`
 dependency linked only under the tag. The tag is opt-in and the scalar kernel
