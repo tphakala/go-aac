@@ -236,6 +236,147 @@ static void fix_stereo(int sr_idx, int rate, int bitrate, float lambda,
     for (int k = 0; k < 1024; k++) put_f32(s1->coeffs[k]);
 }
 
+/* stereo tool-pipeline fixture: the whole non-NMR stereo tool chain in the
+ * order aac_encode_frame runs it (aacenc.c:1223-1255), with PNS live and
+ * with EIGHT_SHORT window groups, neither of which fix_stereo reaches.
+ * Those two are what the stereo corpus was missing: every discrete decision
+ * the chain makes (can_pns, zeroes, band_type, sf_idx, is_mask, ms_mask) is
+ * recorded, so a flipped decision fails the Go test rather than hiding
+ * behind matching floats. */
+static void fix_stereo_tools(int sr_idx, int rate, int bitrate, int short_frame,
+                             int bitres_alloc, float lambda, int bandwidth,
+                             float amp, float alpha, float beta,
+                             float thr_r_lo, float thr_r_hi,
+                             float spr_lo, float spr_hi)
+{
+    static ChannelElement cpe;
+    memset(&cpe, 0, sizeof(cpe));
+    SingleChannelElement *s0 = &cpe.ch[0], *s1 = &cpe.ch[1];
+
+    for (int ch = 0; ch < 2; ch++) {
+        SingleChannelElement *sc = &cpe.ch[ch];
+        if (short_frame) {
+            sc->ics.window_sequence[0] = EIGHT_SHORT_SEQUENCE;
+            sc->ics.num_windows = 8;
+            int gl[8] = {1,3,0,0,3,0,0,1};
+            for (int w = 0; w < 8; w++) sc->ics.group_len[w] = gl[w];
+            sc->ics.swb_sizes  = ff_aac_swb_size_128[sr_idx];
+            sc->ics.swb_offset = ff_swb_offset_128[sr_idx];
+            sc->ics.num_swb    = ff_aac_num_swb_128[sr_idx];
+        } else {
+            sc->ics.window_sequence[0] = ONLY_LONG_SEQUENCE;
+            sc->ics.num_windows = 1;
+            sc->ics.group_len[0] = 1;
+            sc->ics.swb_sizes  = ff_aac_swb_size_1024[sr_idx];
+            sc->ics.swb_offset = ff_swb_offset_1024[sr_idx];
+            sc->ics.num_swb    = ff_aac_num_swb_1024[sr_idx];
+        }
+        sc->ics.max_sfb = sc->ics.num_swb;
+    }
+    cpe.common_window = 1;
+
+    actx.bit_rate = bitrate;
+    actx.sample_rate = rate;
+    actx.flags = 0;
+    actx.global_quality = 0;
+    av_channel_layout_default(&actx.ch_layout, 2);
+
+    sctx.psy.ch = psych;
+    sctx.psy.bitres.alloc = bitres_alloc;
+    sctx.lambda = lambda;
+    sctx.options.pns = 1;
+    sctx.bandwidth = bandwidth;
+
+    /* ch0 broadband, ch1 correlated lows plus scaled highs so I/S has a
+     * reason to fire; the same recipe fix_stereo uses, per window. */
+    synth_frame(s0, amp);
+    {
+        static float n[1040];
+        for (int i = 0; i < 1040; i++)
+            n[i] = 2.0f*lcgf() - 1.0f;
+        for (int k = 0; k < 1024; k++) {
+            float a = alpha * s0->coeffs[k];
+            float b = beta * n[k];
+            s1->coeffs[k] = a + b;
+        }
+        int hf = s0->ics.swb_offset[s0->ics.num_swb*2/3];
+        for (int w = 0; w < s0->ics.num_windows; w++)
+            for (int k = hf; k < 1024/s0->ics.num_windows; k++)
+                s1->coeffs[w*128+k] = 0.6f * s0->coeffs[w*128+k];
+    }
+    for (int ch = 0; ch < 2; ch++) {
+        SingleChannelElement *sc = &cpe.ch[ch];
+        for (int w = 0; w < sc->ics.num_windows; w++) {
+            for (int g = 0; g < sc->ics.num_swb; g++) {
+                FFPsyBand *b = &psych[ch].psy_bands[w*16+g];
+                int a0 = sc->ics.swb_offset[g], a1 = sc->ics.swb_offset[g+1];
+                float e = 0.0f;
+                for (int k = a0; k < a1; k++) {
+                    float t = sc->coeffs[w*128+k]*sc->coeffs[w*128+k];
+                    e += t;
+                }
+                b->energy = e;
+                b->threshold = e * (thr_r_lo + (thr_r_hi - thr_r_lo)*lcgf());
+                b->spread = spr_lo + (spr_hi - spr_lo)*lcgf();
+            }
+        }
+    }
+
+    /* mark_pns then the quantizer, per channel (aacenc.c:1221-1226) */
+    for (int ch = 0; ch < 2; ch++) {
+        sctx.cur_channel = ch;
+        mark_pns(&sctx, &actx, &cpe.ch[ch]);
+        search_for_quantizers_twoloop(&actx, &sctx, &cpe.ch[ch], lambda);
+    }
+    for (int ch = 0; ch < 2; ch++) {
+        for (int i = 0; i < 128; i++) put_u8(cpe.ch[ch].can_pns[i]);
+        for (int i = 0; i < 128; i++) put_i32(cpe.ch[ch].sf_idx[i]);
+        for (int i = 0; i < 128; i++) put_i32(cpe.ch[ch].band_type[i]);
+        for (int i = 0; i < 128; i++) put_u8(cpe.ch[ch].zeroes[i]);
+        put_i32(cpe.ch[ch].ics.max_sfb);
+    }
+
+    /* PNS per channel, sharing one LFSR (aacenc.c:1228-1239) */
+    sctx.random_state = 0x1f2e3d4c;
+    for (int ch = 0; ch < 2; ch++) {
+        sctx.cur_channel = ch;
+        search_for_pns(&sctx, &actx, &cpe.ch[ch]);
+    }
+    put_u32(sctx.random_state);
+    for (int ch = 0; ch < 2; ch++) {
+        for (int i = 0; i < 128; i++) put_i32(cpe.ch[ch].sf_idx[i]);
+        for (int i = 0; i < 128; i++) put_i32(cpe.ch[ch].band_type[i]);
+        for (int i = 0; i < 128; i++) put_u8(cpe.ch[ch].zeroes[i]);
+        for (int i = 0; i < 128; i++) put_f32(cpe.ch[ch].pns_ener[i]);
+    }
+
+    sctx.cur_channel = 0;
+    ff_aac_search_for_is(&sctx, &actx, &cpe);
+    apply_intensity_stereo(&cpe);
+
+    put_u8(cpe.is_mode);
+    for (int i = 0; i < 128; i++) put_u8(cpe.is_mask[i]);
+    for (int i = 0; i < 128; i++) put_u8(cpe.ms_mask[i]);
+    for (int i = 0; i < 128; i++) put_f32(s0->is_ener[i]);
+    for (int i = 0; i < 128; i++) put_f32(s1->is_ener[i]);
+    for (int i = 0; i < 128; i++) put_i32(s1->band_type[i]);
+    for (int k = 0; k < 1024; k++) put_f32(s0->coeffs[k]);
+    for (int k = 0; k < 1024; k++) put_f32(s1->coeffs[k]);
+
+    search_for_ms(&sctx, &cpe);
+    apply_mid_side_stereo(&cpe);
+
+    for (int i = 0; i < 128; i++) put_u8(cpe.ms_mask[i]);
+    for (int i = 0; i < 128; i++) put_i32(s0->sf_idx[i]);
+    for (int i = 0; i < 128; i++) put_i32(s1->sf_idx[i]);
+    for (int i = 0; i < 128; i++) put_i32(s0->band_type[i]);
+    for (int i = 0; i < 128; i++) put_i32(s1->band_type[i]);
+    for (int i = 0; i < 128; i++) put_u8(s0->zeroes[i]);
+    for (int i = 0; i < 128; i++) put_u8(s1->zeroes[i]);
+    for (int k = 0; k < 1024; k++) put_f32(s0->coeffs[k]);
+    for (int k = 0; k < 1024; k++) put_f32(s1->coeffs[k]);
+}
+
 int main(void)
 {
     av_force_cpu_flags(0);
@@ -276,6 +417,28 @@ int main(void)
     fix_stereo(4, 44100, 192000,  70.0f, 0.99f, 0.01f);
     if (fclose(out) != 0 || cdump_wr_err) {
         fprintf(stderr, "ctwoloop: twoloop_stereo.bin write failed\n");
+        return 1;
+    }
+
+    out = fopen("twoloop_stereo_tools.bin", "wb");
+    if (!out) { perror("twoloop_stereo_tools.bin"); return 1; }
+    cdump_wr_err = 0;
+    lcgv = 0x9e3779b9;
+    /*      sr rate  bitrate short alloc lambda   bw    amp  alpha beta thrlo thrhi sprlo sprhi */
+    fix_stereo_tools(4, 44100, 192000, 1,   -1,   410.f, 18900, 1.0f, 0.90f, 0.10f, 0.02f, 0.2f,  1.2f, 2.0f);
+    fix_stereo_tools(4, 44100,  96000, 1,  1200,  2600.f, 15000, 2.0f, 0.97f, 0.03f, 0.05f, 0.5f, 1.0f, 2.0f);
+    fix_stereo_tools(3, 48000, 128000, 0,   -1,   120.f, 18000, 1.0f, 0.95f, 0.05f, 0.002f, 0.02f, 0.6f, 1.8f);
+    fix_stereo_tools(4, 44100,  64000, 0,   -1,   900.f, 13000, 0.5f, 0.80f, 0.30f, 0.03f, 0.3f,  0.9f, 2.0f);
+    /* Loud content against near-zero masking thresholds and a starved rate:
+     * the only combination that drives twoloop's iteration count past
+     * maxits/2 with bands still overdistorted, which is what arms the
+     * "trade overdistorted bands for PNS-able zeroes" branch. That branch
+     * turns a coded band into a PNS band, so getting it wrong swaps real
+     * content for noise; nothing else in the corpus reaches it. */
+    fix_stereo_tools(4, 44100,  16000, 1,   -1,   410.f, 18900, 40.f, 0.90f, 0.10f, 1e-4f, 8e-4f, 1.2f, 2.0f);
+    fix_stereo_tools(4, 44100,  16000, 0,   -1,   410.f, 18900, 40.f, 0.90f, 0.10f, 1e-4f, 8e-4f, 1.2f, 2.0f);
+    if (fclose(out) != 0 || cdump_wr_err) {
+        fprintf(stderr, "ctwoloop: twoloop_stereo_tools.bin write failed\n");
         return 1;
     }
 
