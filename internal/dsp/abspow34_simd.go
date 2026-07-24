@@ -18,8 +18,8 @@ import "github.com/tphakala/simd/f32"
 const AbsPow34IsSIMD = true
 
 // AbsPow34 is the goaac_simd dispatch: it maps out[i] = |in[i]|^(3/4) onto
-// f32.AbsPow34 (NEON on arm64, AVX on amd64, bit-identical pure-Go fallback
-// elsewhere). Its output is byte-identical to absPow34Scalar for every finite
+// f32.AbsPow34 (NEON on arm64, AVX or SSE on amd64, bit-identical pure-Go
+// fallback elsewhere). Its output is byte-identical to absPow34Scalar for finite
 // input: the primitive computes the same exact abs, the same two IEEE
 // correctly-rounded square roots, and the same single correctly-rounded float32
 // multiply, and there is no add so the no-FMA question never arises.

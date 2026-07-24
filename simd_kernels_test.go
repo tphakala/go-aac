@@ -17,12 +17,19 @@ import (
 // Moving a kernel pair to a different tag, a per-kernel tag for instance, would
 // still compile and would still pass every equivalence and oracle test, because
 // a scalar kernel matches the scalar reference trivially. The accessor would
-// then disagree with the kernel actually in the binary, over-claiming under one
-// tag and under-claiming under the other. This assertion is what catches that,
-// in either direction.
+// then disagree with the kernel actually in the binary. This assertion is what
+// catches that.
+//
+// It checks which dispatch file each package compiled, not that the compiled
+// dispatch reaches github.com/tphakala/simd, and it knows only the two kernels
+// named below. So every dispatch pair gated on goaac_simd owes this file a
+// <Kernel>IsSIMD constant and a line here; a third pair that skips both is
+// invisible to it.
 //
 // This file carries no build tag on purpose, so the assertion runs in both
-// builds rather than only in the one the tag selects.
+// builds rather than only in the one the tag selects. It does not subsume the
+// tagged pair in simd_noasm_test.go and simd_simd_test.go: those pin the literal
+// tag name, which this file never mentions.
 func TestSIMDEnabledMatchesKernels(t *testing.T) {
 	if dsp.AbsPow34IsSIMD != SIMDEnabled() {
 		t.Errorf("dsp.AbsPow34IsSIMD = %v, SIMDEnabled() = %v",

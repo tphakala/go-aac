@@ -245,7 +245,9 @@ scalar default and passes the same differential oracle gate, not a relaxed PSNR
 tier.
 
 Measured full-encode NMR speedups over the scalar default (128 kbps, single
-recording, `benchstat` over interleaved rounds):
+recording, `benchstat` over interleaved rounds). Every percentage here is a
+reduction in encode time, so 15% faster means the tagged build spends 15% less
+time, not that it does 15% more work per second:
 
 | Platform | SIMD trellis | Both kernels |
 | -------- | -----------: | -----------: |
