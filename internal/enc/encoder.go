@@ -95,11 +95,15 @@ type Encoder struct {
 	psy           *psy.Context
 	coeffPtrs     [2][]float32
 	cd            coder.Coder
-	nmr           *coder.NMRState // NMR coder state, nil unless Coder == CoderNMR
-	mdct1024      *mdct.MDCT
-	mdct128       *mdct.MDCT
-	pb            *bits.Writer
-	pbBuf         []byte
+	// nmr is the NMR coder state. It stays nil until the first Reset that
+	// selects CoderNMR, and from then on it is retained across Reset for every
+	// coder (issue #45), so non-nil does NOT mean the NMR coder is live: gate
+	// on cfg.Coder == CoderNMR, never on nmr != nil.
+	nmr      *coder.NMRState
+	mdct1024 *mdct.MDCT
+	mdct128  *mdct.MDCT
+	pb       *bits.Writer
+	pbBuf    []byte
 	// Per-frame tool activity flags for the coeffs restore in the rate
 	// loop (aacenc.c:1337-1345); all tools are off in Phase 2 so these
 	// stay zero, but the restore seam is wired now
@@ -121,9 +125,9 @@ func New(cfg Config) (*Encoder, error) {
 }
 
 // Reset re-arms the encoder for a new, independent stream with cfg, reusing
-// every retained heap allocation (MDCT contexts, NMR state, bitstream
-// buffer) so pooled encoders stay allocation-light. Encoding after Reset
-// produces the same bytes as encoding with a fresh New(cfg) encoder. On
+// every retained heap allocation (MDCT contexts, psy context, NMR state,
+// bitstream buffer) so pooled encoders stay allocation-light. Encoding after
+// Reset produces the same bytes as encoding with a fresh New(cfg) encoder. On
 // error the encoder must not be used.
 func (e *Encoder) Reset(cfg Config) error {
 	var idx int
@@ -200,14 +204,19 @@ func (e *Encoder) Reset(cfg Config) error {
 		e.bandwidth = min(max(e.bandwidth, 8000), cfg.SampleRate/2)
 	}
 
+	// The NMR state is retained unconditionally, so a pooled encoder that
+	// alternates coders does not drop and reallocate ~99 KiB on every switch
+	// back to NMR (issue #45). Only the NMR path reads it, so it is zeroed
+	// only there, on every reset that arms that path; a non-NMR reset in
+	// between leaves it dirty but unreachable.
 	if cfg.Coder == CoderNMR {
 		if nmr == nil {
-			nmr = &coder.NMRState{} // ~96 KiB, allocated once (pitfall 12)
+			nmr = &coder.NMRState{} // ~99 KiB, allocated once (pitfall 12)
 		} else {
 			*nmr = coder.NMRState{}
 		}
-		e.nmr = nmr
 	}
+	e.nmr = nmr
 	e.cd.RandomState = 0x1f2e3d4c // PNS LFSR seed (aacenc.c:1640)
 
 	// Psy model init (ff_psy_init call site, aacenc.c:1630-1638). The retained
@@ -334,8 +343,9 @@ func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 	e.lastFramePBCount = e.pb.Count()
 
 	// NMR rate accounting: how many bits the frame really took beyond
-	// what the trellis counted (aacenc.c:1394-1409).
-	if e.nmr != nil {
+	// what the trellis counted (aacenc.c:1394-1409). Gated on the coder,
+	// not on e.nmr != nil, which stays true once the state is retained.
+	if e.cfg.Coder == CoderNMR {
 		counted := 0
 		for i := range e.cfg.Channels {
 			counted += e.nmr.Counted[i]
@@ -353,7 +363,7 @@ func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 
 	// Qavg accounting (aacenc.c:1412-1413): the NMR servo's operating
 	// lambda when it is live, the rate-loop lambda otherwise.
-	if e.nmr != nil && e.nmr.LamRC > 0.0 {
+	if e.cfg.Coder == CoderNMR && e.nmr.LamRC > 0.0 {
 		e.stats.LambdaSum += float64(e.nmr.LamRC)
 	} else {
 		e.stats.LambdaSum += float64(e.lambda)

@@ -47,9 +47,10 @@ const (
 )
 
 // NMRState is the NMR coder's persistent per-band candidate cost curves
-// (~96 KiB) and rate-control carry-over. Allocated once at encoder init
-// and reused across frames (docs/porting-guide.md pitfall 12). Mirrors
-// struct AACNMRCurves (libavcodec/aacenc.h @ d09d5afc3a).
+// (~99 KiB) and rate-control carry-over. Allocated once, on the first encoder
+// init or Reset that selects this coder, then reused across frames and
+// retained across every later Reset (docs/porting-guide.md pitfall 12,
+// issue #45). Mirrors struct AACNMRCurves (libavcodec/aacenc.h @ d09d5afc3a).
 type NMRState struct {
 	Nd [128][NMRNCand]float32 // dist / threshold per candidate
 	Nb [128][NMRNCand]int32   // spectral bits per candidate

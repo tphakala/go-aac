@@ -33,7 +33,11 @@ type stereoInput struct {
 	midSide         int  // s->options.mid_side: -1 auto, 0 off, 1 all
 	intensityStereo bool // s->options.intensity_stereo != 0
 	rcFill          int  // s->nmr->rc_fill (0 when nmr is nil)
-	haveNMR         bool // s->nmr != NULL
+	// haveNMR mirrors the C test s->nmr != NULL. Do NOT wire it from
+	// e.nmr != nil in the Go port: that state is retained across Reset for
+	// every coder (issue #45), so it stays non-nil once allocated. The
+	// equivalent Go test is cfg.Coder == CoderNMR.
+	haveNMR bool
 }
 
 // nmrApplyMSBand recodes one band's window group as mid+side in place,
