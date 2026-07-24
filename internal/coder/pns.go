@@ -218,14 +218,21 @@ func (c *Coder) SearchForPNS(sampleRate, bandwidth int,
 	}
 }
 
-// scalarProduct mirrors the archive's ff_scalarproduct_float_c
-// @ d09d5afc3a as clang compiles it on this platform: the multiply-add is
-// FMA-contracted, so the naive Go form (which gc also fuses on arm64) is
-// the matching translation. Do NOT add a rounding guard here.
+// scalarProduct mirrors ff_scalarproduct_float_c (libavutil/float_dsp.c
+// @ d09d5afc3a), whose accumulator is a plain float32 multiply followed by
+// an add.
+//
+// The float32 conversion is a rounding barrier and is load-bearing. Without
+// it gc fuses the multiply-add into FMADDS on arm64 but leaves MULSS+ADDSS
+// on amd64, which makes the PNS noise energy, and through it the NOISE_BT
+// decision and the emitted bitstream, depend on GOARCH. The reference is a
+// -ffp-contract=off build (the semantics every committed fixture was
+// generated under, see issue #15), which does not fuse either, so rounding
+// here is both the portable and the faithful choice.
 func scalarProduct(v1, v2 []float32) float32 {
 	p := float32(0.0)
 	for i := range v1 {
-		p += v1[i] * v2[i]
+		p += float32(v1[i] * v2[i]) // no cross-statement FMA
 	}
 	return p
 }
