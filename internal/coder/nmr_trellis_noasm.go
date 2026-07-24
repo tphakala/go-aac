@@ -4,6 +4,12 @@
 
 package coder
 
+// NMRTrellisIsSIMD is false on the default build, recording that this file
+// provides the scalar dispatch. The root package asserts it against
+// aac.SIMDEnabled (simd_kernels_test.go), so the public accessor cannot claim a
+// kernel this package did not compile.
+const NMRTrellisIsSIMD = false
+
 // nmrTrellisStep is the default-build dispatch: it calls the canonical scalar
 // kernel directly. The goaac_simd build replaces this file with an
 // f32.MinIdxOfSumRows-backed implementation (nmr_trellis_simd.go) that produces

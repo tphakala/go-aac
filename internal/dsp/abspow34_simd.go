@@ -11,6 +11,12 @@ package dsp
 
 import "github.com/tphakala/simd/f32"
 
+// AbsPow34IsSIMD is true on the goaac_simd build, recording that this file
+// provides the SIMD kernel. The root package asserts it against aac.SIMDEnabled
+// (simd_kernels_test.go), so the public accessor cannot claim a kernel this
+// package did not compile.
+const AbsPow34IsSIMD = true
+
 // AbsPow34 is the goaac_simd dispatch: it maps out[i] = |in[i]|^(3/4) onto
 // f32.AbsPow34 (NEON on arm64, AVX on amd64, bit-identical pure-Go fallback
 // elsewhere). Its output is byte-identical to absPow34Scalar for every finite

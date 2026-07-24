@@ -237,8 +237,9 @@ for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
 Building with `-tags goaac_simd` swaps two of the encoder's hottest kernels for
 SIMD implementations built on
 [github.com/tphakala/simd](https://github.com/tphakala/simd): the NMR Viterbi
-trellis search and the AbsPow34 magnitude transform (`|x|^(3/4)`), with AVX2 on
-x86_64, NEON on arm64, and a portable Go fallback everywhere else. Every backend
+trellis search and the AbsPow34 magnitude transform (`|x|^(3/4)`). Both use NEON
+on arm64. On x86_64 the trellis needs AVX2 and falls back to portable Go without
+it, while AbsPow34 needs only AVX and has an SSE path below that. Every backend
 is bit-identical, so the tagged build produces byte-identical output to the
 scalar default and passes the same differential oracle gate, not a relaxed PSNR
 tier.
@@ -248,17 +249,42 @@ recording, `benchstat` over interleaved rounds):
 
 | Platform | SIMD trellis | Both kernels |
 | -------- | -----------: | -----------: |
-| Raspberry Pi 5 (Cortex-A76, NEON) | 14% faster | pending |
+| Raspberry Pi 5 (Cortex-A76, NEON) | about 14% faster | about 15% faster |
 | x86_64 i7-1260P (AVX2) | 22% faster | about 24% faster |
 
-The trellis search is the larger lever; the AbsPow34 kernel adds roughly a
-further 2.7% on the i7-1260P (4.6% with the psychoacoustic tools disabled). The
-Raspberry Pi 5 figure for AbsPow34 is pending. Both kernels are byte-identical
-to the scalar port, so the tag is a pure speed knob with no effect on output.
+The trellis search is the larger lever. On top of it the AbsPow34 kernel adds
+roughly a further 2.7% on the i7-1260P (4.6% with the psychoacoustic tools
+disabled) and about 1.2% on the Pi 5 (1.3% with the tools disabled). Those
+increments are measured against the trellis-only build, not the scalar one, so
+they compound rather than add.
+
+The Pi 5 row comes from a three-way interleaved run in one session on an
+otherwise idle machine: the scalar default, a trellis-only build (this tree with
+AbsPow34 held at its scalar kernel) and the full tagged build, `benchstat` over
+10 rounds each (n=10 per build, p=0.000). That gives 3.716 s, 3.210 s and
+3.173 s per `BenchmarkEncodeFrames` pass over a 120 s recording, so 13.6% and
+14.6% against the scalar. Those seconds time the codec alone in a warm loop, so
+they do not correspond to the realtime multiples in the `bench-encoders.sh`
+table above, which are whole-process wall clock and predate the scalar-path work
+since; that table is due a re-run. Both kernels are byte-identical to the scalar
+port, so the tag is a pure speed knob with no effect on output.
 
 The default build stays pure Go, with no assembly in the binary and the `simd`
 dependency linked only under the tag. The tag is opt-in and the scalar kernel
 remains canonical.
+
+The two builds differ only in speed, and because the tag is opt-in a downstream
+release can end up on the scalar path unnoticed. `aac.SIMDEnabled()` reports
+which kernel set was compiled in, so a build or startup check can assert it:
+
+```go
+if !aac.SIMDEnabled() {
+    log.Println("go-aac: scalar kernels; build with -tags goaac_simd for the SIMD ones")
+}
+```
+
+The answer describes what was compiled in, not what the CPU running the binary
+supports.
 
 ## License
 

@@ -22,6 +22,10 @@
 // An Encoder is not safe for concurrent use; use one per goroutine. The
 // package has no mutable global state, so any number of encoders run in
 // parallel.
+//
+// Building with -tags goaac_simd swaps two hot kernels for SIMD versions whose
+// output is byte-identical, so the tag only affects speed. It is opt-in, and
+// SIMDEnabled reports which set a binary was built with.
 package aac
 
 // SampleRates is the MPEG-4 audio sample rate table; the position of a rate
