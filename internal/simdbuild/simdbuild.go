@@ -12,7 +12,6 @@
 // than in one of the kernel packages avoids making either of them the authority
 // on a tag that gates both, and means the next consumer needing the answer does
 // not add another copy. Those files decide which implementation compiles; this
-// package
-// turns the same tag into a value. Nothing here observes the kernels, so the
-// root package asserts the two agree (simd_kernels_test.go).
+// package turns the same tag into a value. Nothing here observes the kernels,
+// so the root package asserts that the two agree (simd_kernels_test.go).
 package simdbuild
