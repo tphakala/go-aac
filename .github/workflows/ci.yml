@@ -15,6 +15,23 @@ env:
   # from this exact commit. A distro ffmpeg predates the NMR coder this port
   # targets and is not a valid oracle. Keep in sync with PROVENANCE.md.
   FFMPEG_COMMIT: 'd09d5afc3aebede25d2d245ee23b75a47ea17c3a'
+  # The rest of the oracle recipe. A source commit alone underspecifies the
+  # oracle: the compiler's floating point contraction default decides whether
+  # the intensity-stereo energy accumulation in libavcodec/aacenc_is.c fuses
+  # its multiply-adds, and that moves the stereo reference the PSNR gates
+  # compare against. GCC in `-std=c17` mode picks ISO behaviour (off), Apple
+  # clang picks on, so an unpinned build means the reference depends on who
+  # built it. Every committed C fixture was generated contraction-off, so off
+  # is the semantics this port reproduces. See issue #15 and PROVENANCE.md.
+  # --disable-programs --enable-ffmpeg only skips ffprobe/ffplay, which the
+  # gates never invoke; it does not change libav* behaviour.
+  FFMPEG_CONFIGURE_FLAGS: >-
+    --disable-doc
+    --disable-network
+    --disable-autodetect
+    --disable-programs
+    --enable-ffmpeg
+    --extra-cflags=-ffp-contract=off
 
 permissions:
   contents: read
@@ -177,14 +194,30 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      # The cache key has to cover the whole recipe, not just the source
+      # commit, because the compiler flags are part of what the oracle is (see
+      # FFMPEG_CONFIGURE_FLAGS above). A key that named only the commit would
+      # serve a warm cache after a flag change, so the flags would look applied
+      # while the gates kept running against the old binary. Hashing the flags
+      # in means any future edit to them busts the cache on its own, with no
+      # version number for anyone to remember to bump.
+      - name: Derive the oracle cache key
+        id: oracle-key
+        run: |
+          set -euo pipefail
+          recipe=$(printf '%s\n%s\n' "$FFMPEG_COMMIT" "$FFMPEG_CONFIGURE_FLAGS" |
+                   sha256sum | cut -c1-16)
+          printf 'recipe=%s\n' "$recipe" >> "$GITHUB_OUTPUT"
+
       - name: Restore pinned FFmpeg
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
           path: ~/ffmpeg-oracle
-          # Keyed on the pin, so the build happens once and any change to
-          # FFMPEG_COMMIT builds a fresh oracle instead of reusing a stale one.
-          key: ffmpeg-oracle-${{ runner.os }}-${{ env.FFMPEG_COMMIT }}
+          # Keyed on the pin AND the configure flags, so the build happens once
+          # and any change to either builds a fresh oracle instead of reusing a
+          # stale one.
+          key: ffmpeg-oracle-${{ runner.os }}-${{ env.FFMPEG_COMMIT }}-${{ steps.oracle-key.outputs.recipe }}
 
       - name: Build pinned FFmpeg
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -199,11 +232,11 @@ jobs:
           git checkout FETCH_HEAD
           # Refuse to build anything other than the pin.
           test "$(git rev-parse HEAD)" = "$FFMPEG_COMMIT"
-          # Same flags as the validated local oracle. --disable-programs
-          # --enable-ffmpeg only skips building ffprobe/ffplay, which the gates
-          # never invoke; it does not change libav* behaviour.
-          ./configure --disable-doc --disable-network --disable-autodetect \
-                      --disable-programs --enable-ffmpeg
+          # Same flags as the validated local oracle, taken from the same env
+          # var the cache key hashes, so the key and the build cannot drift
+          # apart. Unquoted on purpose: the flags are meant to word-split.
+          # shellcheck disable=SC2086
+          ./configure $FFMPEG_CONFIGURE_FLAGS
           make -j"$(nproc)"
           mkdir -p ~/ffmpeg-oracle
           cp ffmpeg ~/ffmpeg-oracle/ffmpeg
@@ -218,6 +251,14 @@ jobs:
           ~/ffmpeg-oracle/ffmpeg -hide_banner -version | sed -n '1p'
           ~/ffmpeg-oracle/ffmpeg -hide_banner -decoders | grep -w aac_fixed >/dev/null
           ~/ffmpeg-oracle/ffmpeg -hide_banner -encoders | grep -w aac >/dev/null
+          # Contraction off is part of the pin, not an optional extra: with it
+          # on, the compiler fuses the intensity-stereo energy accumulation in
+          # libavcodec/aacenc_is.c and the C reference the stereo PSNR cells
+          # compare against moves by about 0.4 dB. -buildconf echoes the
+          # configure line, so assert the flag reached this binary rather than
+          # trusting that the cache key did its job.
+          ~/ffmpeg-oracle/ffmpeg -hide_banner -buildconf |
+            grep -F -- '-ffp-contract=off' >/dev/null
 
       - name: Run the differential and PSNR gates
         # GOAAC_REQUIRE_ORACLE turns a missing oracle into a failure instead of

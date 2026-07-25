@@ -198,6 +198,8 @@ single-threaded, one process, file in and file out), reporting wall time, CPU
 seconds, peak RSS and stream size. `GOAAC_FFMPEG` must point at the pinned
 oracle build; a distro FFmpeg is refused, because 7.x and earlier ship a
 different coder set whose `anmr` is not the `nmr` trellis this library ports.
+PROVENANCE.md carries the required configure recipe, including the
+`-ffp-contract=off` that is part of the pin.
 
 ```sh
 GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh          # generated reproducible input
