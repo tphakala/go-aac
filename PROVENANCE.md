@@ -10,6 +10,70 @@ Because it derives from LGPL-licensed FFmpeg code, this repository is
 licensed under the GNU Lesser General Public License, version 2.1 or later
 (see LICENSE), and can never be relicensed under a permissive license.
 
+## The oracle build
+
+The differential gates and the C harnesses under `tools/` compare against a
+locally built FFmpeg from the pinned commit. That commit alone does not
+specify the binary. The compiler and its flags decide the arithmetic, so the
+build recipe is part of the pin:
+
+    ./configure --disable-doc --disable-network --disable-autodetect \
+                --disable-programs --enable-ffmpeg \
+                --extra-cflags=-ffp-contract=off
+
+`--disable-programs --enable-ffmpeg` only skips building ffprobe and ffplay,
+which the gates never invoke; it does not change libav* behaviour. The
+contraction flag does, and it is required.
+
+### Why `-ffp-contract=off` is required
+
+FFmpeg's own configure never passes `-ffp-contract`, so every build inherits
+its compiler's default, and the defaults disagree. GCC in `-std=c17` mode,
+which is what FFmpeg configures, selects the ISO behaviour and does not
+contract. Apple clang contracts by default. Baseline x86-64 has no FMA
+instruction, so it cannot contract whatever the flag says. The same source
+commit therefore compiles to different arithmetic on different hosts.
+
+The site that matters is the intensity-stereo energy accumulation in
+`ff_aac_search_for_is` (libavcodec/aacenc_is.c:136-139):
+
+    ener0  += coef0*coef0;
+    ener1  += coef1*coef1;
+    ener01 += (coef0 + coef1)*(coef0 + coef1);
+    ener01p += (coef0 - coef1)*(coef0 - coef1);
+
+Each `x += y*z` is a single expression, so contraction fuses it into one
+`fmadd` and changes the result by a ULP or two. That is enough to flip
+quantization decisions downstream, which is why only the stereo gate cases
+diverge and the mono ones do not. Measured on the twoloop stereo castanets
+192k cell, contraction moves the C encoder's own PSNR by about 0.41 dB, an
+order of magnitude more than the two other candidate variables: differing
+libm implementations measured 0.00 dB and FFmpeg's hand-written SIMD kernels
+0.015 dB.
+
+Contraction-off is the semantics this port reproduces, not an arbitrary
+choice. Every committed C fixture under `internal/*/testdata/` was generated
+by a contraction-off build, the generators in `tools/ctwoloop` and `tools/ctns`
+record that in their headers, and `internal/coder/stereo_tools.go` splits the
+product into a temporary specifically to stop the Go compiler fusing the same
+expression. A contraction-on oracle does not fail loudly. It quietly becomes a
+different reference, and the PSNR gates then measure the port against
+arithmetic it was never written to reproduce.
+
+### Keeping the recipe honest
+
+CI builds the oracle from `FFMPEG_CONFIGURE_FLAGS` in
+`.github/workflows/ci.yml`, hashes that same variable into the FFmpeg cache
+key so a flag change cannot be served a stale binary, and asserts the flag is
+present in the binary it ends up using. Anyone building a local oracle must
+use the recipe above; check an existing build with:
+
+    ffmpeg -hide_banner -buildconf | grep -F -- '-ffp-contract=off'
+
+The C harnesses in `tools/` `#include` FFmpeg `.c` files directly, so they
+must be compiled with the same flag as the libraries they link against, or the
+fixtures they regenerate will not match the committed ones.
+
 ## Primary C sources
 
 The port draws from these files of the pinned tree (some arrive in later
