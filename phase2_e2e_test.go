@@ -213,8 +213,13 @@ func TestWindowSequenceVsC(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// DisableIS mirrors the -aac_is 0 above. It is not idle: with
+			// intensity stereo left on, the coding bandwidth widens by 15%
+			// (aacenc.c:1609-1610), so the two sides would code to 21200 Hz
+			// and 20000 Hz and this would stop being a same-settings
+			// comparison.
 			goStream := encodeADTSPlanar(t,
-				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true},
+				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true},
 				[][]float32{tc.src})
 
 			goSeq := windowSeqSCE(t, adtsFrames(t, goStream))
@@ -250,12 +255,21 @@ func TestWindowSequenceVsC(t *testing.T) {
 
 // TestPhase2DecodeGate encodes the Phase 2 gate material (transient mono,
 // decorrelated stereo, stereo with common-window short blocks), decodes
-// with the pinned ffmpeg at -v error and asserts the rehearsed PSNR
-// floors, ~1 dB under the rehearsed worst-channel measurements (tonal
-// mono 70.89 dB, castanets mono 60.64 dB, stereo decorrelated 37.55 dB,
-// stereo castanets 37.47 dB; the C fast coder with tools off measures the
-// identical 37.47 dB on the stereo castanets case, so the lower stereo
-// numbers are the algorithm at 64 kbps/channel, not a port defect).
+// with the pinned ffmpeg at -v error and asserts fixed PSNR floors.
+//
+// Measured worst-channel values: tonal mono 79.42 dB, castanets mono
+// 66.05 dB, stereo decorrelated 37.55 dB, stereo castanets 37.48 dB. The
+// lower stereo numbers are the algorithm at 64 kb/s per channel rather than
+// a port defect: the C fast coder measures 37.47 dB on the stereo castanets
+// case.
+//
+// The floors stay at their original rehearsed values, so the two mono cases
+// now clear them by a wide margin instead of the ~1 dB they used to. That
+// margin is the issue #49 fix: this configuration leaves intensity stereo
+// enabled, so the coding bandwidth takes the 15% widening
+// (aacenc.c:1609-1610) and 128 kb/s mono codes to 21200 Hz rather than
+// 20000, which lifted tonal mono from 70.89 dB and castanets mono from
+// 60.64 dB.
 func TestPhase2DecodeGate(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
 	cast := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
