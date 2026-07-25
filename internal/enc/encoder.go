@@ -65,6 +65,9 @@ type Config struct {
 	NMRSpeed      int       // NMR speed level 0..4, 0 = slowest/best
 	// Tool switches; zero values mirror the upstream defaults (all on:
 	// aac_tns 1, aac_pns 1, aac_ms -1 auto, aac_is 1 @ d09d5afc3a).
+	// Setting BOTH DisablePNS and DisableIS also narrows the coding
+	// bandwidth wherever the cutoff formula applies, for every coder
+	// (aacenc.c:1609-1610); the NMR rate table is unaffected.
 	DisableTNS bool // disable temporal noise shaping
 	DisablePNS bool // disable perceptual noise substitution
 	DisableMS  bool // disable the mid/side auto search (non-NMR coders)
@@ -195,8 +198,12 @@ func (e *Encoder) Reset(cfg Config) error {
 				int64(frameBr-rates[bwI])/int64(rates[bwI+1]-rates[bwI]))
 			e.bandwidth = min(e.bandwidth, 22000, cfg.SampleRate/2)
 		} else {
-			if cfg.Coder == CoderNMR {
-				// PNS and I/S are on by default with NMR (aacenc.c:1609)
+			// The 15% widening keys on the PNS and intensity stereo option
+			// flags, never on the coder (aacenc.c:1609-1610); both default
+			// to on for every coder. aac_is is an option flag set
+			// independently of the channel count (aacenc.c:1656), so mono
+			// widens too.
+			if !cfg.DisablePNS || !cfg.DisableIS {
 				frameBr = int(float32(frameBr) * 1.15)
 			}
 			e.bandwidth = max(3000, aacCutoffFromBitrate(frameBr, 1, cfg.SampleRate))

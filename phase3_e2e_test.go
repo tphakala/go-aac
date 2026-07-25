@@ -86,7 +86,7 @@ func TestPhase3NMRGateVsC(t *testing.T) {
 		src  [][]float32
 	}{
 		{"stereo tonal", tonal},
-		{"stereo castanets", [][]float32{casta, castaR}},
+		{sigStereoCastanets, [][]float32{casta, castaR}},
 	} {
 		for _, br := range []int{96000, 128000, 192000} {
 			t.Run(fmt.Sprintf("%s %dk", sig.name, br/1000), func(t *testing.T) {

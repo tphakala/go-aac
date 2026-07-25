@@ -102,6 +102,10 @@ const (
 	coderFast    = "fast"
 )
 
+// sigStereoCastanets names the transient stereo signal shared by the Phase 3
+// and Phase 4 gate tables.
+const sigStereoCastanets = "stereo castanets"
+
 // BenchmarkEncodeFrames drives the low-level encoder over a real recording,
 // one 1024-sample frame at a time. This is the profiling target: no PCM
 // conversion, no ADTS framing, no sink, just the codec.

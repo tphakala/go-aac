@@ -10,7 +10,20 @@ import (
 // TestPipelineOrdering proves by trace that the Go pipeline invokes the
 // tools in exactly the sequence the REAL C aac_encode_frame does (measured
 // with a hooked coder vtable on the archive encoder; see corder.c).
+//
+// corder feeds the same signal, sample rate and bitrate, and its "frame1"
+// line is the first frame that emits a packet, so it is the frame this test
+// traces: the priming EncodeFrame here is corder's f=0.
+//
+// A want may span more than one rate-loop iteration, because the loop is
+// part of what corder measured: the tool sequence simply repeats per pass.
 func TestPipelineOrdering(t *testing.T) {
+	// nonNMRStereoPass is one pass of the non-NMR stereo pipeline: both
+	// channels quantized, then TNS and PNS per channel, then the stereo
+	// decisions.
+	const nonNMRStereoPass = "mark_pns search_for_quantizers mark_pns search_for_quantizers " +
+		"search_for_tns apply_tns_filt search_for_pns search_for_tns apply_tns_filt search_for_pns " +
+		"search_for_is search_for_ms"
 	mk := func(ch int) [][]float32 {
 		out := make([][]float32, ch)
 		for c := range out {
@@ -40,9 +53,12 @@ func TestPipelineOrdering(t *testing.T) {
 		{"twoloop mono", Config{SampleRate: 48000, Bitrate: 128000, Channels: 1, Coder: CoderTwoLoop}, 1,
 			"mark_pns search_for_quantizers search_for_tns apply_tns_filt search_for_pns search_for_is search_for_ms"},
 		{"twoloop stereo", Config{SampleRate: 48000, Bitrate: 128000, Channels: 2, Coder: CoderTwoLoop}, 2,
-			"mark_pns search_for_quantizers mark_pns search_for_quantizers search_for_tns apply_tns_filt search_for_pns search_for_tns apply_tns_filt search_for_pns search_for_is search_for_ms"},
+			nonNMRStereoPass},
+		// The fast coder needs two rate-loop passes on this frame, so the
+		// sequence appears twice; corder's "fast ch=2 tns=1 frame1" line is
+		// the same doubled sequence.
 		{"fast stereo", Config{SampleRate: 48000, Bitrate: 128000, Channels: 2, Coder: CoderFast}, 2,
-			"mark_pns search_for_quantizers mark_pns search_for_quantizers search_for_tns apply_tns_filt search_for_pns search_for_tns apply_tns_filt search_for_pns search_for_is search_for_ms"},
+			nonNMRStereoPass + " " + nonNMRStereoPass},
 	}
 	for _, tc := range cases {
 		e, err := New(tc.cfg)
