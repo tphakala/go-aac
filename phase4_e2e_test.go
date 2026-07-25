@@ -45,6 +45,42 @@ func cEncodeTools(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
 		"-aac_coder", coder)
 }
 
+// gateCastanetSecs is the length of the Phase 4 gate's castanet pair.
+//
+// The gate statistic is whole-signal PSNR, which on this material is
+// effectively a sum over the transient events: between clicks both
+// encoders are transparent and contribute nothing measurable. One click
+// every 0.45 s left just 13 events in the 6 s pair this gate first
+// used, and that sample is far too small, because the per-event error
+// is heavy tailed. A single knife-edge decision (twoloop zeroing the
+// top bands of one short-window group, which search_for_pns then turns
+// into NOISE_BT) costs more than the rest of the file put together, so
+// whichever encoder loses that one coin toss loses the cell.
+//
+// Issue #53 measured what that does to the C encoder itself. Nudging
+// the input by one float32 ULP, about 100 dB below the coding noise,
+// moved the C's own twoloop/castanets/192k reading across a 1.9 dB
+// spread, so the C failed both the -0.5 dB mean bound and the -1.0 dB
+// worst-channel backstop measured against itself. Repeating that
+// measurement per duration, the spread of the mean delta on that cell
+// runs 1.20 dB at 6 s, 0.65 at 12 s, 0.27 at 24 s and 0.28 at 48 s, so
+// 24 s is where the curve flattens. Over 40 one-ULP perturbations at
+// 24 s the C scatters by 0.32 dB on the mean and 0.75 dB on the worst
+// channel, and go-aac sits at the centre of that distribution instead
+// of being scored against one lucky draw of it. The twoloop 96 kbit/s
+// cell tightens from 0.74 dB to 0.26 dB the same way; the three NMR
+// castanet cells were already stable, within 0.01 dB at either length.
+//
+// Lengthening changes no threshold and no statistic, so the gate keeps
+// whole-signal PSNR's full sensitivity to a systematic regression; it
+// only stops a single frame from deciding the verdict. Measured on a
+// deliberate reproduction of the failure above, one extra band zeroed
+// per short-window group: every castanet cell fails, and every twoloop
+// castanet cell responds more strongly at 24 s than it did at 6 s. The
+// tonal pair stays at 8 s, where the same perturbation already moves
+// the C by only about 0.1 dB.
+const gateCastanetSecs = 24
+
 // TestPhase4ToolsGateVsC is the Phase 4 gate (issue #6): with TNS, PNS,
 // I/S and M/S active on BOTH sides (all tool defaults), for BOTH the NMR
 // and twoloop coders, the Go stream size must land within 3% of the C
@@ -54,8 +90,8 @@ func cEncodeTools(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
 func TestPhase4ToolsGateVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
 	tonal := synthStereoNMR(44100*8, 44100)
-	casta := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*6, 44100, 0x5eed1234, 137)
+	casta := synthCastanets(44100*gateCastanetSecs, 44100, 0x0badcafe, 0)
+	castaR := synthCastanets(44100*gateCastanetSecs, 44100, 0x5eed1234, 137)
 	for _, coder := range []struct {
 		name string
 		kind enc.CoderKind
@@ -115,34 +151,10 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 					// M/S and I/S trade quantization error between the two
 					// channels, so per-channel PSNR is not stable under a
 					// stereo-tool decision flip; the gate is the per-case
-					// MEAN delta, with a worst-channel backstop.
-					//
-					// Every case takes the C encoder's own PSNR as its
-					// reference, which assumes that reference is
-					// reproducible. Issue #53 measured that it is not, for
-					// this one case. Perturbing the input by a single float32
-					// ULP (about 100 dB below the coding noise) moves the C's
-					// own channel 0 reading across a 1.9 dB spread, 37.564 to
-					// 39.484 with a mean of 38.294, so the C encoder fails
-					// BOTH -0.5 dB and -1.0 dB measured against itself here.
-					// The other eleven cases are stable to about 0.1 dB.
-					// Asserting 0.5 dB against a reference that scatters by
-					// 1.9 dB measures which draw the reference happened to
-					// land on, so this case carries bounds wider than the
-					// reference's own measured instability.
-					//
-					// This is NOT a quality allowance for the port. Issue #53
-					// proved the twoloop stereo path faithful by replaying
-					// the C's captured inputs through the Go quantizer, which
-					// reproduced its sf_idx, band_type, zeroes and max_sfb
-					// with zero mismatching bands. Re-conditioning the case,
-					// either a better behaved signal at this bitrate or a
-					// reference averaged over enough perturbations to be
-					// stable, is tracked in #53; see also #15.
-					meanBound, worstBound := -0.5, -1.0
-					if coder.name == coderTwoLoop && sig.name == sigStereoCastanets && br == 192000 {
-						meanBound, worstBound = -1.0, -1.6
-					}
+					// MEAN delta, with a worst-channel backstop. One rule
+					// for all twelve cases; see gateCastanetSecs for why the
+					// reference is reproducible enough to assert against.
+					const meanBound, worstBound = -0.5, -1.0
 					if meanDelta < meanBound {
 						t.Errorf("mean PSNR %.2f dB below the C encoder's, gate allows %.1f dB",
 							meanDelta, meanBound)
