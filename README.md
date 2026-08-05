@@ -227,29 +227,35 @@ changes AAC encoding by about 1%. It is compiler auto-vectorization. GCC emits
 631 packed floating-point arithmetic instructions in `aaccoder.o` from plain C,
 concentrated in the NMR quantizer search; Go's compiler emits none anywhere in
 the equivalent package. Closing the gap therefore means hand-writing in Go what
-C compilers generate for free. The optional SIMD kernels below take the first
+C compilers generate for free. The default SIMD kernels below take the first
 steps; the scalar port remains the canonical reference.
 
 Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
 and stereo. Decoding is far cheaper, roughly 3000x real time for mono and 1500x
 for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
 
-### Optional SIMD kernels (`-tags goaac_simd`)
+### SIMD kernels (default, opt out with `-tags noasm`)
 
-Building with `-tags goaac_simd` swaps two of the encoder's hottest kernels for
-SIMD implementations built on
+By default the encoder's hottest kernels are SIMD implementations built on
 [github.com/tphakala/simd](https://github.com/tphakala/simd): the NMR Viterbi
-trellis search and the AbsPow34 magnitude transform (`|x|^(3/4)`). Both use NEON
+trellis search, the AbsPow34 magnitude transform (`|x|^(3/4)`), and the
+QuantizeBands quantizer. The `simd` library picks the widest path the CPU
+supports at runtime and falls back to pure Go on any CPU without it. All use NEON
 on arm64. On x86_64 the trellis needs AVX2 and falls back to portable Go without
-it, while AbsPow34 needs only AVX and has an SSE path below that. Every backend
-is bit-identical, so the tagged build produces byte-identical output to the
-scalar default and passes the same differential oracle gate, not a relaxed PSNR
-tier.
+it, while AbsPow34 and QuantizeBands use AVX (AbsPow34 with an SSE path below
+that). Every backend is bit-identical, so the default build produces
+byte-identical output to the scalar path and passes the same differential oracle
+gate, not a relaxed PSNR tier.
 
-Measured full-encode NMR speedups over the scalar default (128 kbps, single
-recording, `benchstat` over interleaved rounds). Every percentage here is a
-reduction in encode time, so 15% faster means the tagged build spends 15% less
-time, not that it does 15% more work per second:
+Building with `-tags noasm` selects the pure-Go scalar kernels instead: no
+assembly in the binary and the `simd` dependency linked out entirely, for a
+smaller and more easily audited build. The scalar kernels stay canonical and are
+the reference the SIMD ones are gated against.
+
+Measured full-encode NMR speedups of the SIMD default over the `-tags noasm`
+scalar build (128 kbps, single recording, `benchstat` over interleaved rounds).
+Every percentage here is a reduction in encode time, so 15% faster means the SIMD
+default spends 15% less time, not that it does 15% more work per second:
 
 | Platform | SIMD trellis | Both kernels |
 | -------- | -----------: | -----------: |
@@ -260,31 +266,29 @@ The trellis search is the larger lever. On top of it the AbsPow34 kernel adds
 roughly a further 2.7% on the i7-1260P (4.6% with the psychoacoustic tools
 disabled) and about 1.2% on the Pi 5 (1.3% with the tools disabled). Those
 increments are measured against the trellis-only build, not the scalar one, so
-they compound rather than add.
+they compound rather than add. The QuantizeBands quantizer is SIMD by default as
+well; its separate speedup is not broken out in the table above (#57).
 
 The Pi 5 row comes from a three-way interleaved run in one session on an
-otherwise idle machine: the scalar default, a trellis-only build (this tree with
-AbsPow34 held at its scalar kernel) and the full tagged build, `benchstat` over
-10 rounds each (n=10 per build, p=0.000). That gives 3.716 s, 3.210 s and
-3.173 s per `BenchmarkEncodeFrames` pass over a 120 s recording, so 13.6% and
-14.6% against the scalar. Those seconds time the codec alone in a warm loop, so
-they do not correspond to the realtime multiples in the `bench-encoders.sh`
-table above, which are whole-process wall clock and have not been re-measured
-since the scalar-path optimizations landed (#57). Both kernels are
-byte-identical to the scalar port, so the tag is a pure speed knob with no
-effect on output.
+otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
+(this tree with AbsPow34 held at its scalar kernel) and the full SIMD build,
+`benchstat` over 10 rounds each (n=10 per build, p=0.000). That gives 3.716 s,
+3.210 s and 3.173 s per `BenchmarkEncodeFrames` pass over a 120 s recording, so
+13.6% and 14.6% against the scalar. Those seconds time the codec alone in a warm
+loop, so they do not correspond to the realtime multiples in the
+`bench-encoders.sh` table above, which are whole-process wall clock and have not
+been re-measured since the scalar-path optimizations landed (#57). All three
+kernels are byte-identical to the scalar port, so the choice is a pure speed knob
+with no effect on output.
 
-The default build stays pure Go, with no assembly in the binary and the `simd`
-dependency linked only under the tag. The tag is opt-in and the scalar kernel
-remains canonical.
-
-The two builds differ only in speed, and because the tag is opt-in a downstream
-release can end up on the scalar path unnoticed. `aac.SIMDEnabled()` reports
-which kernel set was compiled in, so a build or startup check can assert it:
+The two builds differ only in speed, and because `-tags noasm` silently drops to
+the scalar path a downstream release can end up there unnoticed.
+`aac.SIMDEnabled()` reports which kernel set was compiled in, so a build or
+startup check can assert it:
 
 ```go
 if !aac.SIMDEnabled() {
-    log.Println("go-aac: scalar kernels; build with -tags goaac_simd for the SIMD ones")
+    log.Println("go-aac: scalar kernels (built with -tags noasm); the default build has the SIMD ones")
 }
 ```
 

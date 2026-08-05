@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-//go:build goaac_simd
+//go:build !noasm
 
 package dsp
 
@@ -14,7 +14,7 @@ package dsp
 
 import "github.com/tphakala/simd/f32"
 
-// QuantizeBandsIsSIMD is true on the goaac_simd build, recording that this file
+// QuantizeBandsIsSIMD is true on the default build, recording that this file
 // provides the SIMD kernel. The root package asserts it against aac.SIMDEnabled
 // (simd_kernels_test.go), so the public accessor cannot claim a kernel this
 // package did not compile.
@@ -31,7 +31,7 @@ const QuantizeBandsIsSIMD = true
 // a real NEON win.
 const avxMinLen = 8
 
-// QuantizeBands is the goaac_simd dispatch. It maps the pow34-scaled magnitude
+// QuantizeBands is the default dispatch. It maps the pow34-scaled magnitude
 // quantizer onto the generic f32 primitives:
 //
 //	signed:   out[i] = copysign(int32(clamp(scaled[i]*q34 + rounding, 0, maxval)), in[i])
@@ -65,7 +65,7 @@ const avxMinLen = 8
 // panics on a short in even when unsigned, and the contract must not weaken per
 // branch. The panic must live here because the f32 primitives silently process
 // min(len(...)) instead of panicking, so without it the destination-length
-// contract that TestKernelLengthContract pins would quietly weaken on the tagged
+// contract that TestKernelLengthContract pins would quietly weaken on the default
 // build. quantizebands_simd_equiv_test.go gates the output bitwise against
 // quantizeBandsScalar.
 //

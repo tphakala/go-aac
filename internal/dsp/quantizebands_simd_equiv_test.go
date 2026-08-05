@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-//go:build goaac_simd
+//go:build !noasm
 
 package dsp
 
@@ -11,10 +11,10 @@ import (
 	"testing"
 )
 
-// This file gates the goaac_simd QuantizeBands bitwise against the canonical
+// This file gates the SIMD QuantizeBands bitwise against the canonical
 // quantizeBandsScalar in dsp.go, on the finite, non-negative-magnitude domain
 // the encoder actually produces. Like abspow34_simd_equiv_test.go it is tagged
-// goaac_simd on purpose: our reference IS the scalar, so on the default build the
+// !noasm on purpose: our reference IS the scalar, so under -tags noasm the
 // exported wrapper IS the scalar and an untagged equiv test would compare a
 // function against its own body, a tautology.
 //
@@ -107,7 +107,7 @@ func buildQuantizeBandsInputs(n int, rng *rand.Rand) (scaled, sign []float32) {
 	return scaled, sign
 }
 
-// TestQuantizeBandsMatchesScalar asserts the goaac_simd QuantizeBands is
+// TestQuantizeBandsMatchesScalar asserts the SIMD QuantizeBands is
 // bit-identical to quantizeBandsScalar across the size sweep and the full
 // parameter grid, for both isSigned values, comparing int32 outputs exactly.
 func TestQuantizeBandsMatchesScalar(t *testing.T) {

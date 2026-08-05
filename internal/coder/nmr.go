@@ -68,7 +68,7 @@ type NMRState struct {
 	PrevWasShort     bool    // previous frame was a short block
 	RunBurst         float32 // transient bit-burst factor
 
-	// trellis is per-encoder scratch for the goaac_simd trellis kernel.
+	// trellis is per-encoder scratch for the SIMD trellis kernel.
 	// Fixed-size arrays keep the encoder at 0 allocs/frame; the zero value
 	// is valid because the SIMD wrapper writes every cell it reads within a
 	// call (NMRState is reset by struct zeroing in internal/enc).
@@ -115,8 +115,8 @@ func ceilDiv(a, b int) int {
 // find the previous-band candidate minimising dpp[op] + lamsf[d], then set
 // dp[o] = node[o] + that cost and record the back-pointer bp[o].
 // Mirrors aacencdsp.c:nmr_trellis_step_c @ d09d5afc3a, the SCALAR kernel.
-// This is the canonical kernel: the default build calls it directly through
-// the nmrTrellisStep forwarder, and the goaac_simd build falls back to it for
+// This is the canonical kernel: the noasm build calls it directly through
+// the nmrTrellisStep forwarder, and the default build falls back to it for
 // step <= 0 (which nmrSolve never passes, but the equivalence sweep does).
 // Both accumulations are plain adds with no multiply, so no FMA can arise
 // here and every add stays separately rounded. Separately: walking op in

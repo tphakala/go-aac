@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-//go:build goaac_simd
+//go:build !noasm
 
 package dsp
 
@@ -11,13 +11,13 @@ package dsp
 
 import "github.com/tphakala/simd/f32"
 
-// AbsPow34IsSIMD is true on the goaac_simd build, recording that this file
+// AbsPow34IsSIMD is true on the default build, recording that this file
 // provides the SIMD kernel. The root package asserts it against aac.SIMDEnabled
 // (simd_kernels_test.go), so the public accessor cannot claim a kernel this
 // package did not compile.
 const AbsPow34IsSIMD = true
 
-// AbsPow34 is the goaac_simd dispatch: it maps out[i] = |in[i]|^(3/4) onto
+// AbsPow34 is the default dispatch: it maps out[i] = |in[i]|^(3/4) onto
 // f32.AbsPow34 (NEON on arm64, AVX or SSE on amd64, bit-identical pure-Go
 // fallback elsewhere). Its output is byte-identical to absPow34Scalar for finite
 // input: the primitive computes the same exact abs, the same two IEEE
@@ -29,7 +29,7 @@ const AbsPow34IsSIMD = true
 // site: the public encoder rejects non-finite PCM (#18). The panic must live
 // here because f32.AbsPow34 silently processes min(len(dst), len(src)) instead
 // of panicking, so without it the destination-length contract would quietly
-// weaken on the tagged build.
+// weaken on the default build.
 func AbsPow34(out, in []float32) {
 	if len(in) < len(out) {
 		panic("dsp: AbsPow34: source shorter than out")

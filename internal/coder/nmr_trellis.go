@@ -2,7 +2,7 @@
 
 package coder
 
-// nmrTrellisScratch is per-encoder scratch for the goaac_simd trellis kernel
+// nmrTrellisScratch is per-encoder scratch for the SIMD trellis kernel
 // (internal/coder/nmr_trellis_simd.go). It is sized for the worst case after
 // the offset window is clipped to what any valid (o, op) pair can reach (see
 // nmrTrellisGeom): the shared kernel spans at most 2*NMRNCand-1 lamsf entries
@@ -10,7 +10,7 @@ package coder
 // 3*NMRNCand-2. The zero value is valid: the wrapper writes every cell it reads
 // within a single call, so the struct-zeroing reset of NMRState
 // (internal/enc/encoder.go) cannot leave a stale 0 that would win an argmin.
-// The default (scalar) build never touches these fields.
+// The noasm (scalar) build never touches these fields.
 type nmrTrellisScratch struct {
 	vals [NMRNCand]float32       // per-row argmin cost from MinIdxOfSumRows
 	idxs [NMRNCand]int32         // per-row argmin index from MinIdxOfSumRows
@@ -18,7 +18,7 @@ type nmrTrellisScratch struct {
 	padk [3*NMRNCand - 2]float32 // +Inf-padded dpp signal (the k argument)
 }
 
-// trellisGeom is the clipped window geometry the goaac_simd trellis wrapper
+// trellisGeom is the clipped window geometry the SIMD trellis wrapper
 // maps onto f32.MinIdxOfSumRows.
 type trellisGeom struct {
 	dLo, dHi          int // clipped offset range, d = o - op in [dLo, dHi]
@@ -27,7 +27,7 @@ type trellisGeom struct {
 	basep             int // the base argument passed to f32.MinIdxOfSumRows
 }
 
-// nmrTrellisGeom returns the clipped Viterbi window geometry the goaac_simd
+// nmrTrellisGeom returns the clipped Viterbi window geometry the SIMD
 // trellis wrapper maps onto f32.MinIdxOfSumRows, for step > 0 only (the wrapper
 // delegates step <= 0 to the scalar kernel). It reproduces
 // nmrTrellisStepScalar's per-call offset bounds, then clips them to

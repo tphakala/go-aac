@@ -2,9 +2,9 @@
 
 // Package dsp provides the scalar DSP kernels of the AAC encoder. The exported
 // AbsPow34 and QuantizeBands are per-build dispatch points: the default build
-// calls the canonical absPow34Scalar and quantizeBandsScalar defined here, while
-// the goaac_simd build swaps in f32-backed versions producing byte-identical
-// output. The scalars stay canonical.
+// maps them onto f32-backed SIMD versions, while a -tags noasm build calls the
+// canonical absPow34Scalar and quantizeBandsScalar defined here. Both produce
+// byte-identical output; the scalars stay canonical.
 package dsp
 
 import "github.com/tphakala/go-aac/internal/fmath"
@@ -59,7 +59,7 @@ func VectorFMulReverse(dst, src0, src1 []float32) {
 // absPow34Scalar computes out[i] = |in[i]|^(3/4) via nested square roots.
 // Mirrors libavcodec/aacencdsp.c:abs_pow34_v @ d09d5afc3a. This is the canonical
 // scalar kernel; the exported AbsPow34 is a per-build dispatch (abspow34_noasm.go
-// and abspow34_simd.go), and abspow34_simd_equiv_test.go gates the tagged build
+// and abspow34_simd.go), and abspow34_simd_equiv_test.go gates the default build
 // bitwise against it.
 func absPow34Scalar(out, in []float32) {
 	if len(in) < len(out) {
@@ -78,7 +78,7 @@ func absPow34Scalar(out, in []float32) {
 // quantizeBandsScalar quantizes pow34-scaled coefficients. This is the canonical
 // scalar kernel; the exported QuantizeBands is a per-build dispatch
 // (quantizebands_noasm.go and quantizebands_simd.go), and
-// quantizebands_simd_equiv_test.go gates the tagged build bitwise against it.
+// quantizebands_simd_equiv_test.go gates the default build bitwise against it.
 // Mirrors libavcodec/aacencdsp.c:quantize_bands @ d09d5afc3a:
 // out[i] = (int)min(scaled[i]*Q34 + rounding, maxval), sign from in[i].
 // The product is rounded to float32 before the rounding constant is added,

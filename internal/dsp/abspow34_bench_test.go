@@ -7,7 +7,7 @@ import (
 )
 
 // This file is untagged, so it compiles into BOTH builds and calls the exported
-// (dispatched) AbsPow34. benchstat can then A/B the default and -tags goaac_simd
+// (dispatched) AbsPow34. benchstat can then A/B the default and -tags noasm
 // builds on identical binary shapes. b.ReportAllocs keeps the 0-alloc invariant
 // visible on both. Inputs come from the package LCG (lcg.go) so both builds see
 // the same deterministic bytes.

@@ -126,10 +126,11 @@
 // same holds for a FrameEncoder and a Decoder. The package-level
 // EncodeInterleaved function is safe for concurrent use.
 //
-// # Optional SIMD kernels
+// # SIMD kernels
 //
-// Encoding here runs through the same kernels as the aac package, so the
-// optional -tags goaac_simd build reaches the encoders here as well (decoding is
+// Encoding here runs through the same kernels as the aac package, so the SIMD
+// kernels the default build links reach the encoders here as well, and a
+// -tags noasm build routes them through the scalar path instead (decoding is
 // unaffected). Output is byte-identical either way; aac.SIMDEnabled reports
 // which set was compiled in.
 package pcm

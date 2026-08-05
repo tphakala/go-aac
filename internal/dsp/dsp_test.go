@@ -95,7 +95,7 @@ func TestQuantizeBandsMatchesFFMIN(t *testing.T) {
 						}
 						// Pin the canonical scalar, not the exported dispatch: this
 						// test deliberately probes NaN, +/-Inf and negative scaled,
-						// which the goaac_simd kernel legitimately diverges on (NaN
+						// which the SIMD kernel legitimately diverges on (NaN
 						// converts arch-dependently, and a negative magnitude hits
 						// the kernel's minV=0 floor the scalar lacks). The encoder
 						// produces none of those (#18); the tagged equiv test pins
