@@ -93,7 +93,16 @@ func TestQuantizeBandsMatchesFFMIN(t *testing.T) {
 						for i := range in {
 							in[i] = sign
 						}
-						QuantizeBands(got, in, scaled, isSigned, maxval, q34, rounding)
+						// Pin the canonical scalar, not the exported dispatch: this
+						// test deliberately probes NaN, +/-Inf and negative scaled,
+						// which the goaac_simd kernel legitimately diverges on (NaN
+						// converts arch-dependently, and a negative magnitude hits
+						// the kernel's minV=0 floor the scalar lacks). The encoder
+						// produces none of those (#18); the tagged equiv test pins
+						// the dispatch on the in-domain inputs. What this test pins
+						// is the scalar's min() form against the C FFMIN form, and
+						// that is unchanged by the build tag.
+						quantizeBandsScalar(got, in, scaled, isSigned, maxval, q34, rounding)
 						refQuantizeBandsFFMIN(want, in, scaled, isSigned, maxval, q34, rounding)
 						for i := range want {
 							if got[i] == want[i] {
@@ -179,11 +188,21 @@ func TestKernelLengthContract(t *testing.T) {
 			in := make([]float32, dstLen)[:srcLen]
 			AbsPow34(out, in)
 		}},
-		{"QuantizeBands", func(dstLen, srcLen int) {
+		{"QuantizeBands/signed", func(dstLen, srcLen int) {
 			out := make([]int32, dstLen)
 			in := make([]float32, dstLen)[:srcLen]
 			scaled := make([]float32, dstLen)[:srcLen]
 			QuantizeBands(out, in, scaled, true, 3, 1, 0.4054)
+		}},
+		// The unsigned dispatch never passes in to the primitive, so pin that a
+		// short in still panics on that branch (the length check precedes the
+		// isSigned split). dstLen 8 sits at the SIMD AVX-activation width, so the
+		// panic case exercises the primitive dispatch, not the small-n scalar guard.
+		{"QuantizeBands/unsigned", func(dstLen, srcLen int) {
+			out := make([]int32, dstLen)
+			in := make([]float32, dstLen)[:srcLen]
+			scaled := make([]float32, dstLen)[:srcLen]
+			QuantizeBands(out, in, scaled, false, 3, 1, 0.4054)
 		}},
 	}
 	for _, tc := range cases {

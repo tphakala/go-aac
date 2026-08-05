@@ -35,6 +35,10 @@ func TestSIMDEnabledMatchesKernels(t *testing.T) {
 		t.Errorf("dsp.AbsPow34IsSIMD = %v, SIMDEnabled() = %v",
 			dsp.AbsPow34IsSIMD, SIMDEnabled())
 	}
+	if dsp.QuantizeBandsIsSIMD != SIMDEnabled() {
+		t.Errorf("dsp.QuantizeBandsIsSIMD = %v, SIMDEnabled() = %v",
+			dsp.QuantizeBandsIsSIMD, SIMDEnabled())
+	}
 	if coder.NMRTrellisIsSIMD != SIMDEnabled() {
 		t.Errorf("coder.NMRTrellisIsSIMD = %v, SIMDEnabled() = %v",
 			coder.NMRTrellisIsSIMD, SIMDEnabled())

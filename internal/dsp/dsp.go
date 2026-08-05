@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Package dsp provides the scalar DSP kernels of the AAC encoder. The exported
-// AbsPow34 is a per-build dispatch point: the default build calls the canonical
-// absPow34Scalar defined here, while the goaac_simd build swaps in an f32-backed
-// version producing byte-identical output. The scalar stays canonical.
+// AbsPow34 and QuantizeBands are per-build dispatch points: the default build
+// calls the canonical absPow34Scalar and quantizeBandsScalar defined here, while
+// the goaac_simd build swaps in f32-backed versions producing byte-identical
+// output. The scalars stay canonical.
 package dsp
 
 import "github.com/tphakala/go-aac/internal/fmath"
@@ -74,7 +75,10 @@ func absPow34Scalar(out, in []float32) {
 	}
 }
 
-// QuantizeBands quantizes pow34-scaled coefficients.
+// quantizeBandsScalar quantizes pow34-scaled coefficients. This is the canonical
+// scalar kernel; the exported QuantizeBands is a per-build dispatch
+// (quantizebands_noasm.go and quantizebands_simd.go), and
+// quantizebands_simd_equiv_test.go gates the tagged build bitwise against it.
 // Mirrors libavcodec/aacencdsp.c:quantize_bands @ d09d5afc3a:
 // out[i] = (int)min(scaled[i]*Q34 + rounding, maxval), sign from in[i].
 // The product is rounded to float32 before the rounding constant is added,
@@ -102,7 +106,7 @@ func absPow34Scalar(out, in []float32) {
 // x86_64 over a full encode. Hoisting float32(maxval) mirrors clang; hoisting
 // it while keeping the branch measured slower than either form, so the two
 // belong together.
-func QuantizeBands(out []int32, in, scaled []float32, isSigned bool, maxval int, q34, rounding float32) {
+func quantizeBandsScalar(out []int32, in, scaled []float32, isSigned bool, maxval int, q34, rounding float32) {
 	if len(in) < len(out) || len(scaled) < len(out) {
 		panic("dsp: QuantizeBands: source shorter than out")
 	}
