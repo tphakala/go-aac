@@ -206,29 +206,41 @@ GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh          # generat
 GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh my.wav   # your own WAV
 ```
 
-Results on a 120 s 48 kHz mono recording at 128 kbps, single-threaded. The
-ratio is CPU seconds, go-aac over FFmpeg; the FFmpeg CLI spawns helper threads,
-so CPU time compares more honestly than wall time.
+Results on a 120 s 48 kHz mono recording at 128 kbps, single-threaded, over a
+real broadband recording that keeps the NMR search fully loaded; a sparse
+synthetic tone understates it. The ratio is CPU seconds, go-aac over FFmpeg;
+the FFmpeg CLI spawns helper threads, so CPU time compares more honestly than
+wall time. The x86_64 figures are pinned to the performance cores for stability
+on that hybrid part; the Pi 5 is a single core cluster and needs no pinning.
 
 | Coder | Platform | go-aac | FFmpeg | go/C |
 | ----- | -------- | -----: | -----: | ---: |
-| NMR (default) | Raspberry Pi 5 | 19x realtime | 40x | 2.09x |
-| NMR (default) | x86_64 (i7-1260P) | 43x | 98x | 2.09x |
-| NMR (default) | Apple M4 Pro | 68x | 179x | 2.64x |
-| twoloop | x86_64 | 78x | 156x | 1.74x |
-| fast | x86_64 | 143x | 308x | 1.87x |
+| NMR (default) | Raspberry Pi 5 | 38x realtime | 40x | 1.04x |
+| NMR (default) | x86_64 (i7-1260P) | 86x | 86x | 0.93x |
+| twoloop | Raspberry Pi 5 | 41x | 75x | 1.71x |
+| twoloop | x86_64 (i7-1260P) | 99x | 144x | 1.31x |
+| fast | Raspberry Pi 5 | 90x | 162x | 1.65x |
+| fast | x86_64 (i7-1260P) | 195x | 284x | 1.27x |
 
-go-aac runs at roughly **twice the CPU time of the C** and in **about a third
-of the memory** (4.1 MB peak RSS against 10.4 to 13.3 MB). Stream sizes match
-FFmpeg to within 0.001% for the NMR and fast coders at the same bitrate.
+On the default NMR coder go-aac now runs **at or near parity** with the C in CPU
+time (0.93x on the i7-1260P, 1.04x on the Pi 5), in **about a third of the
+memory** (roughly 4 MB peak RSS against about 12 MB). The twoloop and fast
+coders stay modestly behind, roughly 1.3x on x86_64 and 1.65x to 1.71x on the
+Pi. Stream sizes track FFmpeg closely at the same bitrate, within about 0.001%
+for NMR and on the order of 0.01% for the other coders. These numbers moved a
+long way from the first baseline, where the NMR coder cost about twice the C's
+CPU time; the default SIMD kernels and the scalar-path work since then roughly
+doubled its throughput.
 
-The gap is **not** FFmpeg's hand-written assembly: disabling it (`-cpuflags 0`)
-changes AAC encoding by about 1%. It is compiler auto-vectorization. GCC emits
+That closing was compiler auto-vectorization, now hand-written in Go. GCC emits
 631 packed floating-point arithmetic instructions in `aaccoder.o` from plain C,
 concentrated in the NMR quantizer search; Go's compiler emits none anywhere in
-the equivalent package. Closing the gap therefore means hand-writing in Go what
-C compilers generate for free. The default SIMD kernels below take the first
-steps; the scalar port remains the canonical reference.
+the equivalent package. Disabling FFmpeg's hand-written assembly (`-cpuflags 0`)
+changes AAC encoding by only about 1%, so the gap was never the asm. The default
+SIMD kernels below reproduce that vectorization for the NMR trellis and
+quantizer, which is what brought the default coder level with the C; twoloop and
+fast are not targeted as heavily and keep more of the gap. The scalar port
+remains the canonical reference.
 
 Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
 and stereo. Decoding is far cheaper, roughly 3000x real time for mono and 1500x
@@ -267,7 +279,7 @@ roughly a further 2.7% on the i7-1260P (4.6% with the psychoacoustic tools
 disabled) and about 1.2% on the Pi 5 (1.3% with the tools disabled). Those
 increments are measured against the trellis-only build, not the scalar one, so
 they compound rather than add. The QuantizeBands quantizer is SIMD by default as
-well; its separate speedup is not broken out in the table above (#57).
+well; its separate speedup is not broken out in the table above.
 
 The Pi 5 row comes from a three-way interleaved run in one session on an
 otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
@@ -276,10 +288,9 @@ otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
 3.210 s and 3.173 s per `BenchmarkEncodeFrames` pass over a 120 s recording, so
 13.6% and 14.6% against the scalar. Those seconds time the codec alone in a warm
 loop, so they do not correspond to the realtime multiples in the
-`bench-encoders.sh` table above, which are whole-process wall clock and have not
-been re-measured since the scalar-path optimizations landed (#57). All three
-kernels are byte-identical to the scalar port, so the choice is a pure speed knob
-with no effect on output.
+`bench-encoders.sh` table above, which are whole-process wall clock over a
+different harness. All three kernels are byte-identical to the scalar port, so
+the choice is a pure speed knob with no effect on output.
 
 The two builds differ only in speed, and because `-tags noasm` silently drops to
 the scalar path a downstream release can end up there unnoticed.
