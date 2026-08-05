@@ -8,7 +8,7 @@ import (
 
 // Like abspow34_bench_test.go this file is untagged, so it compiles into BOTH
 // builds and calls the exported (dispatched) QuantizeBands. benchstat then A/Bs
-// the default and -tags goaac_simd builds on identical binary shapes.
+// the default and -tags noasm builds on identical binary shapes.
 // b.ReportAllocs keeps the 0-alloc invariant visible on both. Inputs come from
 // the package LCG (lcg.go) so both builds see the same deterministic bytes.
 
@@ -16,7 +16,7 @@ import (
 // (96), the 128-lane shape and the full 1024-line frame, for both the signed and
 // unsigned dispatch (they hit different f32 kernels:
 // Float32ToInt32ScaleClampSigned vs Float32ToInt32ScaleClamp). n=4 (the most
-// common band, below the SIMD AVX-activation width so the goaac_simd build routes
+// common band, below the SIMD AVX-activation width so the default build routes
 // it to the scalar guard) and n=8 (that width) are included so the small-n
 // dispatch crossover is visible; 20 shows the AVX 8-lane remainder (a 4-element
 // scalar tail). scaled is run through AbsPow34 so it is a non-negative magnitude,

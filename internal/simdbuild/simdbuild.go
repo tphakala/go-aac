@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-// Package simdbuild records whether the optional SIMD kernels are compiled into
-// this build. It holds nothing but the constant Enabled, split across a
-// !goaac_simd / goaac_simd file pair, the same way the kernel dispatch points
-// are (internal/coder/nmr_trellis_{noasm,simd}.go,
-// internal/dsp/abspow34_{noasm,simd}.go).
+// Package simdbuild records whether the SIMD kernels are compiled into this
+// build. They are enabled by default; a build with -tags noasm selects the
+// scalar fallback instead. It holds nothing but the constant Enabled, split
+// across a default / noasm file pair, the same way the kernel dispatch points
+// are (internal/coder/nmr_trellis_{simd,noasm}.go,
+// internal/dsp/abspow34_{simd,noasm}.go,
+// internal/dsp/quantizebands_{simd,noasm}.go).
 //
 // Its reason to exist is that code with no kernel of its own, in particular the
 // public aac.SIMDEnabled accessor, would otherwise have to carry the build tag

@@ -40,7 +40,7 @@ func nmrTrellisStepRef(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	}
 }
 
-// plantTrellisSentinels seeds dpp with the sentinel shapes the goaac_simd
+// plantTrellisSentinels seeds dpp with the sentinel shapes the SIMD
 // differential must reconcile byte-for-byte with the scalar, which writes a
 // RAW MaxFloat32 (never node[o]+vals[o], which would overflow to +Inf) whenever
 // no candidate beats the MaxFloat32 incumbent: a lone MaxFloat32 (saturates the
@@ -73,7 +73,7 @@ func TestNMRTrellisStepMatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 
 	// Reused across the whole sweep on purpose: a stale value left in the
-	// scratch by one call must never leak into the next (the goaac_simd wrapper
+	// scratch by one call must never leak into the next (the SIMD wrapper
 	// must write every cell it reads), which the encoder relies on after the
 	// NMRState struct-zeroing reset.
 	var ts nmrTrellisScratch

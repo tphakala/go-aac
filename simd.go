@@ -4,13 +4,14 @@ package aac
 
 import "github.com/tphakala/go-aac/internal/simdbuild"
 
-// SIMDEnabled reports whether this build was compiled with -tags goaac_simd, so
-// that the optional SIMD kernels (the NMR Viterbi trellis, the AbsPow34 magnitude
-// transform, and the QuantizeBands quantizer) are compiled in instead of their
-// scalar counterparts.
+// SIMDEnabled reports whether this build has the SIMD kernels (the NMR Viterbi
+// trellis, the AbsPow34 magnitude transform, and the QuantizeBands quantizer)
+// compiled in instead of their scalar counterparts. They are the default; a
+// build with -tags noasm links the scalar kernels and no SIMD code, and
+// SIMDEnabled returns false.
 //
-// It is a performance signal and nothing more. The tag is opt-in, so a consumer
-// can ship the slower scalar path without noticing; SIMDEnabled lets a build or
+// It is a performance signal and nothing more. The opt-out exists for a consumer
+// who wants a pure-Go binary with no linked assembly; SIMDEnabled lets a build or
 // startup check assert which one it got. It says nothing about output: both
 // builds produce byte-identical streams and pass the same differential gate
 // against the C reference. It also says nothing about the CPU underneath, only

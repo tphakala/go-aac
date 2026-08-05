@@ -21,15 +21,15 @@ import (
 // catches that.
 //
 // It checks which dispatch file each package compiled, not that the compiled
-// dispatch reaches github.com/tphakala/simd, and it knows only the two kernels
-// named below. So every dispatch pair gated on goaac_simd owes this file a
+// dispatch reaches github.com/tphakala/simd, and it knows only the three kernels
+// named below. So every dispatch pair gated on noasm owes this file a
 // <Kernel>IsSIMD constant and a line here; a third pair that skips both is
 // invisible to it.
 //
 // This file carries no build tag on purpose, so the assertion runs in both
 // builds rather than only in the one the tag selects. It does not subsume the
-// tagged pair in simd_noasm_test.go and simd_simd_test.go: those pin the literal
-// tag name, which this file never mentions.
+// tagged pair in simd_noasm_test.go and simd_simd_test.go: those are each gated
+// by a literal build tag (noasm / !noasm) that this file never carries.
 func TestSIMDEnabledMatchesKernels(t *testing.T) {
 	if dsp.AbsPow34IsSIMD != SIMDEnabled() {
 		t.Errorf("dsp.AbsPow34IsSIMD = %v, SIMDEnabled() = %v",

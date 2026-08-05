@@ -30,10 +30,10 @@ tasks:
     cmds:
       - go test -race ./...
 
-  test:simd:
-    desc: Run the race tests against the optional SIMD kernels (-tags goaac_simd)
+  test:noasm:
+    desc: Run the race tests against the scalar fallback (-tags noasm)
     cmds:
-      - go test -race -tags goaac_simd ./...
+      - go test -race -tags noasm ./...
 
   bench:
     desc: Run all benchmarks
@@ -45,16 +45,16 @@ tasks:
     cmds:
       - GOARCH=amd64 go vet ./...
       - GOARCH=arm64 go vet ./...
-      - GOARCH=amd64 go vet -tags goaac_simd ./...
-      - GOARCH=arm64 go vet -tags goaac_simd ./...
+      - GOARCH=amd64 go vet -tags noasm ./...
+      - GOARCH=arm64 go vet -tags noasm ./...
 
   lint:
     desc: Run golangci-lint for both tag settings
     cmds:
       - golangci-lint run ./...
-      # The tagged files are invisible to the default run, so a violation in
+      # The noasm files are invisible to the default run, so a violation in
       # them only shows up here and in CI's lint matrix.
-      - golangci-lint run --build-tags goaac_simd ./...
+      - golangci-lint run --build-tags noasm ./...
 
   tidy:
     desc: Tidy and verify go.mod
@@ -68,12 +68,12 @@ tasks:
       - git config core.hooksPath .githooks
 
   check:
-    desc: Full local gate (build, vet, lint, race tests, SIMD race tests)
+    desc: Full local gate (build, vet, lint, race tests, noasm race tests)
     cmds:
       - task: build
       - task: vet
       - task: lint
       - task: test:race
       # CI vets, lints and tests both tag settings, so the local gate does too;
-      # a goaac_simd-only failure is otherwise invisible until push.
-      - task: test:simd
+      # a noasm-only failure is otherwise invisible until push.
+      - task: test:noasm

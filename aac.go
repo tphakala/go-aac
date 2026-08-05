@@ -23,9 +23,12 @@
 // package has no mutable global state, so any number of encoders run in
 // parallel.
 //
-// Building with -tags goaac_simd swaps two hot kernels for SIMD versions whose
-// output is byte-identical, so the tag only affects speed. It is opt-in, and
-// SIMDEnabled reports which set a binary was built with.
+// By default three hot kernels are SIMD versions, backed by
+// github.com/tphakala/simd, which picks the widest path the CPU supports and
+// falls back to pure Go. Building with -tags noasm swaps in their scalar
+// counterparts and links no simd code. The output is byte-identical either way,
+// so the choice only affects speed, and SIMDEnabled reports which set a binary
+// was built with.
 package aac
 
 // SampleRates is the MPEG-4 audio sample rate table; the position of a rate

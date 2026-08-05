@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-//go:build goaac_simd
+//go:build !noasm
 
 package coder
 
@@ -9,13 +9,13 @@ import (
 	"github.com/tphakala/simd/f32"
 )
 
-// NMRTrellisIsSIMD is true on the goaac_simd build, recording that this file
+// NMRTrellisIsSIMD is true on the default build, recording that this file
 // provides the SIMD dispatch. The root package asserts it against
 // aac.SIMDEnabled (simd_kernels_test.go), so the public accessor cannot claim a
 // kernel this package did not compile.
 const NMRTrellisIsSIMD = true
 
-// nmrTrellisStep is the goaac_simd dispatch: it maps one Viterbi step onto
+// nmrTrellisStep is the default dispatch: it maps one Viterbi step onto
 // f32.MinIdxOfSumRows (NEON on arm64, AVX2 on amd64, bit-identical pure-Go
 // fallback elsewhere) and reconciles the scalar's MaxFloat32 sentinel
 // byte-for-byte. Its output is identical to nmrTrellisStepScalar; the geometry

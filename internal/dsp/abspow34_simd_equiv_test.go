@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
-//go:build goaac_simd
+//go:build !noasm
 
 package dsp
 
@@ -11,11 +11,11 @@ import (
 	"testing"
 )
 
-// This file gates the goaac_simd AbsPow34 bitwise against the canonical
-// absPow34Scalar in dsp.go. It is tagged goaac_simd, unlike
+// This file gates the SIMD AbsPow34 bitwise against the canonical
+// absPow34Scalar in dsp.go. It is tagged !noasm, unlike
 // nmr_trellis_equiv_test.go, on purpose: the trellis reference is an independent
 // C transcription meaningful on both builds, but our reference IS the scalar, so
-// on the default build the exported wrapper IS the scalar and an untagged equiv
+// under -tags noasm the exported wrapper IS the scalar and an untagged equiv
 // test would compare a function against its own body, a tautology.
 //
 // All inputs are finite. NaN and the infinities are the classes where the SIMD
@@ -71,7 +71,7 @@ func buildAbsPow34Input(n int, rng *rand.Rand) []float32 {
 	return in
 }
 
-// TestAbsPow34MatchesScalar asserts the goaac_simd AbsPow34 is bit-identical to
+// TestAbsPow34MatchesScalar asserts the SIMD AbsPow34 is bit-identical to
 // absPow34Scalar across the size sweep, comparing raw float32 bits so a differing
 // NaN payload or signed zero would fail (neither occurs on finite inputs; the
 // pins cover the signed-zero and overflow edges).
