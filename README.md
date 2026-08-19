@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/tphakala/go-aac/actions/workflows/ci.yml/badge.svg)](https://github.com/tphakala/go-aac/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-aac.svg)](https://pkg.go.dev/github.com/tphakala/go-aac)
+[![codecov](https://codecov.io/gh/tphakala/go-aac/branch/main/graph/badge.svg)](https://codecov.io/gh/tphakala/go-aac)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/tphakala/go-aac)](go.mod)
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/License-LGPL--2.1--or--later-blue.svg)](LICENSE)
 [![Sponsor](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/tphakala)
