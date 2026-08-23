@@ -4,11 +4,20 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-aac.svg)](https://pkg.go.dev/github.com/tphakala/go-aac)
 [![codecov](https://codecov.io/gh/tphakala/go-aac/branch/main/graph/badge.svg)](https://codecov.io/gh/tphakala/go-aac)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/tphakala/go-aac)](go.mod)
+[![Latest tag](https://img.shields.io/github/v/tag/tphakala/go-aac?sort=semver&label=release)](https://github.com/tphakala/go-aac/tags)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tphakala/go-aac/badge)](https://scorecard.dev/viewer/?uri=github.com/tphakala/go-aac)
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/License-LGPL--2.1--or--later-blue.svg)](LICENSE)
 [![Sponsor](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/tphakala)
 
 Pure-Go AAC-LC encoder and decoder, ported from FFmpeg's native AAC encoder and
 fixed-point decoder. No cgo and no external libraries in the published module.
+
+It is the AAC member of a family of pure-Go audio libraries that also covers
+[WAV](https://github.com/tphakala/go-wav),
+[FLAC](https://github.com/tphakala/go-flac),
+[Opus](https://github.com/tphakala/go-opus) and
+[M4A](https://github.com/tphakala/go-m4a), and it presents the same API shape as
+its siblings, so a program that already speaks one of them speaks this one too.
 
 ## Status
 
@@ -307,14 +316,16 @@ if !aac.SIMDEnabled() {
 The answer describes what was compiled in, not what the CPU running the binary
 supports.
 
+## Sponsor
+
+go-aac is maintained in my own time. If it is useful to you or your project, you
+can support continued maintenance through GitHub Sponsors; sponsorship is
+entirely optional and never gates any feature.
+
+[![Sponsor on GitHub](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor%20%40tphakala)](https://github.com/sponsors/tphakala)
+
 ## License
 
 LGPL-2.1-or-later. go-aac is a derivative work of FFmpeg's LGPL-licensed AAC
 encoder and cannot be relicensed permissively. See [LICENSE](LICENSE) and
 [PROVENANCE.md](PROVENANCE.md).
-
-## Sponsor
-
-If go-aac is useful to you, consider sponsoring its development.
-
-[![Sponsor on GitHub](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor%20%40tphakala)](https://github.com/sponsors/tphakala)
