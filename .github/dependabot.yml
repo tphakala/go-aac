@@ -1,0 +1,30 @@
+# Dependabot keeps Go module dependencies and GitHub Actions versions current.
+# Updates arrive as PRs that the CI workflow validates before merge. Minor and
+# patch bumps are grouped into a single PR to cut noise; major bumps stay
+# separate since they may need code changes.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
