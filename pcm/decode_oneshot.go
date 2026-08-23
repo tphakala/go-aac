@@ -25,8 +25,8 @@ var ErrDecodeLimit = errors.New("go-aac/pcm: decoded size limit exceeded")
 // DecodeInterleaved reads an entire AAC-LC stream from r and returns the decoded
 // interleaved little-endian S16 PCM together with the stream info. It is the
 // one-shot mirror of EncodeInterleaved, and of the sibling one-shot decoders in
-// the go-audio family (go-wav's pcm.DecodeInterleaved, go-flac's, go-m4a's
-// aacm4a). The same options as NewDecoder apply, so WithRawStream decodes a raw
+// the go-audio family (go-wav's, go-flac's and go-opus' pcm.DecodeInterleaved).
+// The same options as NewDecoder apply, so WithRawStream decodes a raw
 // stream plus its AudioSpecificConfig.
 //
 // It stops at DefaultMaxDecodedBytes and returns a wrapped ErrDecodeLimit if the
