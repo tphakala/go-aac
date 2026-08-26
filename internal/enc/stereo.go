@@ -55,7 +55,7 @@ func nmrApplyMSBand(cpe *coder.ChannelElement, psy0, psy1 *[128]coder.PsyBand,
 		r := sce1.Coeffs[start+(w+w2)*128:]
 		var em, es float32
 		for i := range length {
-			m := (l[i] + r[i]) * 0.5
+			m := float32((l[i] + r[i]) * 0.5) // no cross-statement FMA
 			r[i] = m - r[i]
 			l[i] = m
 			t1 := float32(l[i] * l[i]) // no cross-statement FMA
@@ -82,8 +82,8 @@ func nmrISImageMasked(cpe *coder.ChannelElement, w, g, start, length, gl int,
 	if dot < 0.0 {
 		p = -1
 	}
-	t := float32(2*p) * dot
-	ener01 := ener0 + ener1 + t // energy of L + p*R
+	t := float32(float32(2*p) * dot) // no cross-statement FMA
+	ener01 := ener0 + ener1 + t      // energy of L + p*R
 	if ener01 <= smallestNormal {
 		return false
 	}
@@ -95,7 +95,7 @@ func nmrISImageMasked(cpe *coder.ChannelElement, w, g, start, length, gl int,
 		l := cpe.Ch[0].Coeffs[start+(w+w2)*128:]
 		r := cpe.Ch[1].Coeffs[start+(w+w2)*128:]
 		for i := range length {
-			pr := float32(p) * r[i]
+			pr := float32(float32(p) * r[i]) // no cross-statement FMA
 			c := float32((l[i] + pr) * scale)
 			dl := l[i] - c
 			tc := float32(ps * c)
@@ -137,7 +137,7 @@ func nmrApplyISBand(cpe *coder.ChannelElement, psy0, psy1 *[128]coder.PsyBand,
 		r := cpe.Ch[1].Coeffs[start+(w+w2)*128:]
 		var ec float32
 		for i := range length {
-			pr := float32(p) * r[i]
+			pr := float32(float32(p) * r[i]) // no cross-statement FMA
 			l[i] = float32((l[i] + pr) * scale)
 			r[i] = 0.0
 			t := float32(l[i] * l[i]) // no cross-statement FMA
@@ -201,7 +201,7 @@ func nmrDecideStereo(in stereoInput, cpe *coder.ChannelElement,
 				r := sce1.Coeffs[start+(w+w2)*128:]
 				var el, er, em, es, d float32
 				for i := range length {
-					m := (l[i] + r[i]) * 0.5
+					m := float32((l[i] + r[i]) * 0.5) // no cross-statement FMA
 					sv := m - r[i]
 					t0 := float32(l[i] * l[i]) // no cross-statement FMA
 					el += t0
@@ -318,7 +318,7 @@ func applyMidSideStereo(cpe *coder.ChannelElement) {
 					continue
 				}
 				for i := range int(ics.SwbSizes[g]) {
-					l := (cpe.Ch[0].Coeffs[start+i] + cpe.Ch[1].Coeffs[start+i]) * 0.5
+					l := float32((cpe.Ch[0].Coeffs[start+i] + cpe.Ch[1].Coeffs[start+i]) * 0.5) // no cross-statement FMA
 					r := l - cpe.Ch[1].Coeffs[start+i]
 					cpe.Ch[0].Coeffs[start+i] = l
 					cpe.Ch[1].Coeffs[start+i] = r

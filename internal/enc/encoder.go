@@ -360,7 +360,7 @@ func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 		if counted > 0 {
 			side := float32(e.lastFramePBCount) - float32(counted)
 			if e.nmr.SideInited {
-				e.nmr.SideEMA += 0.125 * (side - e.nmr.SideEMA)
+				e.nmr.SideEMA += float32(0.125 * (side - e.nmr.SideEMA)) // no FMA
 			} else {
 				e.nmr.SideEMA = side
 				e.nmr.SideInited = true
