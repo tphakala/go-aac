@@ -167,26 +167,31 @@ jobs:
       # Any crash a run finds is committed under testdata/fuzz as a regression
       # seed, so the corpus grows monotonically. These are smoke runs, not a
       # substitute for a long local fuzz session.
+      #
+      # Each target runs through scripts/fuzz-smoke.sh, which tolerates a bare
+      # `-fuzztime` deadline expiry on a slow/loaded runner (issue #62) while
+      # still failing on a real crasher (a written reproducer under
+      # testdata/fuzz/). Args: <FuzzTarget> <pkg> <fuzztime-seconds>.
       - name: Fuzz ADTS parser
-        run: go test -run='^$' -fuzz=FuzzParseADTS -fuzztime=20s ./internal/dec/
+        run: scripts/fuzz-smoke.sh FuzzParseADTS ./internal/dec/ 20
       - name: Fuzz ASC parser
-        run: go test -run='^$' -fuzz=FuzzParseASC -fuzztime=15s ./internal/dec/
+        run: scripts/fuzz-smoke.sh FuzzParseASC ./internal/dec/ 15
       - name: Fuzz frame decode
-        run: go test -run='^$' -fuzz=FuzzDecodeFrame -fuzztime=20s ./internal/dec/
+        run: scripts/fuzz-smoke.sh FuzzDecodeFrame ./internal/dec/ 20
       - name: Fuzz public stream decode
-        run: go test -run='^$' -fuzz=FuzzDecodeStream -fuzztime=20s ./pcm/
+        run: scripts/fuzz-smoke.sh FuzzDecodeStream ./pcm/ 20
 
       # The SIMD trellis kernel (default build) against the naive
       # C-transcription reference: random shapes the fixed grid only samples,
       # asserting bit-identical output and never-panic.
       - name: Fuzz SIMD trellis differential
-        run: go test -run='^$' -fuzz=FuzzNMRTrellisStep -fuzztime=20s ./internal/coder/
+        run: scripts/fuzz-smoke.sh FuzzNMRTrellisStep ./internal/coder/ 20
       # The SIMD AbsPow34 kernel (default build) against the scalar reference it must match.
       - name: Fuzz SIMD AbsPow34 differential
-        run: go test -run='^$' -fuzz=FuzzAbsPow34Equiv -fuzztime=20s ./internal/dsp/
+        run: scripts/fuzz-smoke.sh FuzzAbsPow34Equiv ./internal/dsp/ 20
       # The SIMD QuantizeBands kernel (default build) against the scalar reference it must match.
       - name: Fuzz SIMD QuantizeBands differential
-        run: go test -run='^$' -fuzz=FuzzQuantizeBandsEquiv -fuzztime=20s ./internal/dsp/
+        run: scripts/fuzz-smoke.sh FuzzQuantizeBandsEquiv ./internal/dsp/ 20
 
   # The differential/PSNR gates are the only check that can tell a correct
   # encoder from a plausible-but-wrong one; PSNR alone cannot see a misported
