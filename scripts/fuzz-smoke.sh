@@ -43,22 +43,28 @@ if [ "$status" -eq 0 ]; then
   # go test exits 0 when -fuzz matches no target, so a typo'd target name or
   # wrong package would pass this smoke step without fuzzing anything. Fail
   # loudly instead: the step must actually exercise a target.
-  if printf '%s\n' "$output" | grep -qF "$nomatch_marker"; then
+  if [[ $output == *"$nomatch_marker"* ]]; then
     printf '::error::%s matched no fuzz target in %s (typo or wrong package?); nothing was fuzzed\n' "$target" "$pkg"
     exit 1
   fi
   exit 0
 fi
 
+# Match markers with bash string globbing rather than `printf | grep`: under
+# `set -o pipefail`, grep -q exits on the first match and closes the pipe, and
+# a still-writing printf on a large fuzz log then takes SIGPIPE, so the pipeline
+# reports non-zero and the `if` would treat a real match as a miss (gitar-bot).
+# A pure `[[ ]]` test has no pipe and no such failure mode.
+
 # A written reproducer, or a worker that hung/terminated, is a real failure
 # regardless of any timeout text, so these are checked first and fail closed.
-if printf '%s\n' "$output" | grep -qF -e "$crash_marker" -e "$hung_marker"; then
+if [[ $output == *"$crash_marker"* || $output == *"$hung_marker"* ]]; then
   printf '::error::%s found a crasher or the fuzzing process terminated unexpectedly; check the log and commit any reproducer under testdata/fuzz/%s/\n' "$target" "$target"
   exit 1
 fi
 
 # No reproducer, deadline surfaced: known slow-runner timeout. Warn and pass.
-if printf '%s\n' "$output" | grep -qF "$timeout_marker"; then
+if [[ $output == *"$timeout_marker"* ]]; then
   printf '::warning::%s hit the -fuzztime deadline on a slow runner (no crasher found); treating as pass\n' "$target"
   exit 0
 fi
