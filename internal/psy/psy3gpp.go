@@ -32,14 +32,14 @@ func (ctx *Context) calcBitDemand(pe float32, bits, size int, shortWindow bool) 
 	ctx.fillLevel = fmath.Clipi(ctx.fillLevel, 0, size)
 	fillLevel := fmath.Clipf(float32(ctx.fillLevel)/float32(size), clipLow, clipHigh)
 	clippedPe := fmath.Clipf(pe, ctx.pe.min, ctx.pe.max)
-	bitSave := (fillLevel + bitsaveAdd) * bitsaveSlope
-	bitSpend := (fillLevel + bitspendAdd) * bitspendSlope
+	bitSave := float32((fillLevel + bitsaveAdd) * bitsaveSlope)    // no cross-statement FMA
+	bitSpend := float32((fillLevel + bitspendAdd) * bitspendSlope) // no cross-statement FMA
 	// The bit factor formula deviates from the (incorrect) spec graph; see
 	// the comment block at aacpsy.c:534-539.
-	bitFactor := 1.0 - bitSave + ((bitSpend-bitSave)/(ctx.pe.max-ctx.pe.min))*(clippedPe-ctx.pe.min)
+	bitFactor := 1.0 - bitSave + float32(((bitSpend-bitSave)/(ctx.pe.max-ctx.pe.min))*(clippedPe-ctx.pe.min)) // no FMA
 	// Slowly forget pe.min when pe stays above the mean (aacpsy.c:541-548).
 	ctx.pe.max = max(pe, ctx.pe.max)
-	forgetfulMinPe := ((ctx.pe.min * psyPeForgetSlope) +
+	forgetfulMinPe := (float32(ctx.pe.min*psyPeForgetSlope) + // no FMA
 		max(ctx.pe.min, pe*(pe/ctx.pe.max))) / (psyPeForgetSlope + 1)
 	ctx.pe.min = min(pe, forgetfulMinPe)
 
@@ -60,8 +60,8 @@ func calcPE3gpp(band *band) float32 {
 		pe := a - fmath.Log232(band.thr)
 		band.activeLines = band.nzLines
 		if pe < psy3gppC1 {
-			pe = pe*psy3gppC3 + psy3gppC2
-			a = a*psy3gppC3 + psy3gppC2
+			pe = float32(pe*psy3gppC3) + psy3gppC2 // no FMA
+			a = float32(a*psy3gppC3) + psy3gppC2   // no FMA
 			band.activeLines *= psy3gppC3
 		}
 		band.pe = pe * band.nzLines
@@ -116,7 +116,7 @@ func calcThr3gpp(wi *WindowInfo, numBands int, pch *channel, bandSizes []uint8,
 			band.energy = 0.0
 			if wstart < cutoff {
 				for i := range int(bandSizes[g]) {
-					t := coefs[start+i] * coefs[start+i]
+					t := float32(coefs[start+i] * coefs[start+i]) // no cross-statement FMA
 					band.energy += t
 					formFactor += fmath.Sqrt32(fmath.Absf(coefs[start+i]))
 				}
@@ -324,7 +324,7 @@ func (ctx *Context) analyzeChannel(ch int, coefs []float32, wi *WindowInfo) {
 					if band.avoidHoles != ahNone && coeffs[g].minSnr < psySnr1dB {
 						coeffs[g].minSnr = psySnr1dB
 						band.thr = band.energy * psySnr1dB
-						pe += band.activeLines*1.5 - band.pe
+						pe += float32(band.activeLines*1.5) - band.pe // no FMA
 					}
 				}
 			}

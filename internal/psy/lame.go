@@ -18,9 +18,9 @@ func psyHpFilter(firbuf []float32, hpfsmpl *[blockSizeLong]float32) {
 		sum1 = firbuf[i+(psyLameFirLen-1)/2]
 		sum2 = 0.0
 		for j := 0; j < ((psyLameFirLen-1)/2)-1; j += 2 {
-			t1 := tables.PsyFirCoeffs[j] * (firbuf[i+j] + firbuf[i+psyLameFirLen-j])
+			t1 := float32(tables.PsyFirCoeffs[j] * (firbuf[i+j] + firbuf[i+psyLameFirLen-j])) // no cross-statement FMA
 			sum1 += t1
-			t2 := tables.PsyFirCoeffs[j+1] * (firbuf[i+j+1] + firbuf[i+psyLameFirLen-j-1])
+			t2 := float32(tables.PsyFirCoeffs[j+1] * (firbuf[i+j+1] + firbuf[i+psyLameFirLen-j-1])) // no cross-statement FMA
 			sum2 += t2
 		}
 		hpfsmpl[i] = (sum1 + sum2) * 32768.0

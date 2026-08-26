@@ -78,7 +78,7 @@ func (c *Coder) isEncodingErr(cpe *ChannelElement, psy0, psy1 *[128]PsyBand,
 		// the IS downmix scale is computed in double precision (C sqrt)
 		isScale := fmath.Sqrt64(float64(ener0 / ener01))
 		for i := range size {
-			p := float32(phase) * sce1.Coeffs[base+i]
+			p := float32(float32(phase) * sce1.Coeffs[base+i]) // no cross-statement FMA
 			is[i] = float32(float64(sce0.Coeffs[base+i]+p) * isScale)
 		}
 		dsp.AbsPow34(l34[:size], sce0.Coeffs[base:base+size])
@@ -103,7 +103,7 @@ func (c *Coder) isEncodingErr(cpe *ChannelElement, psy0, psy1 *[128]PsyBand,
 			t2 := float32(d2 * d2)
 			distSpecErr += t2
 		}
-		distSpecErr *= lambda / minthr
+		distSpecErr = float32(distSpecErr * (lambda / minthr)) // no cross-statement FMA
 		dist2 += distSpecErr
 	}
 
@@ -243,8 +243,8 @@ func (c *Coder) SearchForMS(cpe *ChannelElement, psy0, psy1 *[128]PsyBand,
 				// mid/side SF and book for the whole window group
 				for w2 := range sce0.ICS.GroupLen[w] {
 					for i := range size {
-						m[i] = (sce0.Coeffs[start+(w+w2)*128+i] +
-							sce1.Coeffs[start+(w+w2)*128+i]) * 0.5
+						m[i] = float32((sce0.Coeffs[start+(w+w2)*128+i] +
+							sce1.Coeffs[start+(w+w2)*128+i]) * 0.5) // no cross-statement FMA
 						s[i] = m[i] - sce1.Coeffs[start+(w+w2)*128+i]
 					}
 					dsp.AbsPow34(m34[:size], m[:size])
@@ -279,8 +279,8 @@ func (c *Coder) SearchForMS(cpe *ChannelElement, psy0, psy1 *[128]PsyBand,
 						minthr := min(band0.Threshold, band1.Threshold)
 						var b1, b2, b3, b4 int
 						for i := range size {
-							m[i] = (sce0.Coeffs[start+(w+w2)*128+i] +
-								sce1.Coeffs[start+(w+w2)*128+i]) * 0.5
+							m[i] = float32((sce0.Coeffs[start+(w+w2)*128+i] +
+								sce1.Coeffs[start+(w+w2)*128+i]) * 0.5) // no cross-statement FMA
 							s[i] = m[i] - sce1.Coeffs[start+(w+w2)*128+i]
 						}
 
@@ -299,7 +299,7 @@ func (c *Coder) SearchForMS(cpe *ChannelElement, psy0, psy1 *[128]PsyBand,
 						dist2 += c.quantizeBandCost(m[:size], m34[:size], mididx, midcb,
 							lambda/(minthr+fltMinNormal32), fmath.Inf32(), &b3, nil)
 						dist2 += c.quantizeBandCost(s[:size], s34[:size], sididx, sidcb,
-							mslambda/(minthr*bmax+fltMinNormal32), fmath.Inf32(), &b4, nil)
+							mslambda/(float32(minthr*bmax)+fltMinNormal32), fmath.Inf32(), &b4, nil) // no FMA
 						b0 += b1 + b2
 						b1sum += b3 + b4
 						dist1 -= float32(b1 + b2)
