@@ -67,8 +67,8 @@ func FindFormFactor(groupLen, swbSize int, thresh float32, scaled []float32,
 			}
 			variance = fmath.Sqrt32(variance * iswbSizem1)
 
-			e2 = float32(e2 * iswbSize) // rounding barrier: no deferred FMA
-			frm := e / min(e+4*variance, maxval)
+			e2 = float32(e2 * iswbSize)                   // rounding barrier: no deferred FMA
+			frm := e / min(e+float32(4*variance), maxval) // no FMA
 			form += e2 * fmath.Sqrt32(frm) / max(0.5, nzl)
 			weight += e2
 		}

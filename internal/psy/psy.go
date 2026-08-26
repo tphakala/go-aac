@@ -196,8 +196,8 @@ type Context struct {
 // calcBark returns the Bark value for a given frequency.
 // Mirrors aacpsy.c:calc_bark @ d09d5afc3a.
 func calcBark(f float32) float32 {
-	t1 := 13.3 * fmath.Atan32(0.00076*f)
-	t2 := 3.5 * fmath.Atan32((f/7500.0)*(f/7500.0))
+	t1 := float32(13.3 * fmath.Atan32(0.00076*f))            // no cross-statement FMA
+	t2 := float32(3.5 * fmath.Atan32((f/7500.0)*(f/7500.0))) // no cross-statement FMA
 	return t1 + t2
 }
 
