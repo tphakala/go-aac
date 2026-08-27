@@ -36,6 +36,7 @@ func FuzzParseASC(f *testing.F) {
 	f.Add([]byte{0x11, 0x90})
 	f.Add([]byte{0x12, 0x10})
 	f.Add([]byte{0x2b, 0x92, 0x08, 0x00}) // explicit SBR wrapper
+	f.Add([]byte{0xea, 0x12, 0x08})       // explicit PS wrapper
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {
 		c, err := ParseASC(data)

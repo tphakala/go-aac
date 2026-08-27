@@ -35,8 +35,13 @@ Approach), so the pieces marked done are done in the strong sense.
   to `ffmpeg -c:a aac_fixed` at the sample level. The public `pcm.NewDecoder`
   streams an ADTS (or raw plus ASC) AAC-LC stream to interleaved little-endian
   S16 PCM, matching the oracle byte for byte across the test corpus and on Apple
-  afconvert output, with no cgo. Mono and stereo, 44.1 and 48 kHz. Not yet
-  covered: HE-AAC (SBR/PS), 960-sample frames, and channel configs above stereo.
+  afconvert output, with no cgo. Mono and stereo across the AAC-LC sample-rate
+  range: the parser accepts the full MPEG-4 sample-rate table (7.35 to 96 kHz),
+  and decode is byte-verified against the oracle at representative rates from 8
+  to 96 kHz. The encoder, separately, is restricted to 44.1 and 48 kHz. HE-AAC
+  (SBR/PS) is rejected with a precise `ErrUnsupportedSBR` / `ErrUnsupportedPS`
+  so a caller can hand it to an external decoder; 960-sample frames and channel
+  configs above stereo are also not covered.
 
 Quality tracks the C encoder closely. At 96/128/192 kbps stereo with the NMR
 coder on both sides, decoded PSNR is within **+-0.04 dB** of FFmpeg's own
@@ -155,7 +160,7 @@ interleaved little-endian S16 PCM out.
 
 ```go
 d, err := aacpcm.NewDecoder(r) // ADTS by default, resynced past leading garbage
-if err != nil {                // classify with errors.Is against aacpcm.ErrCorruptStream or aacpcm.ErrUnsupported
+if err != nil {                // errors.Is: aacpcm.ErrCorruptStream, aacpcm.ErrUnsupported, or the precise ErrUnsupportedSBR / ErrUnsupportedPS
     return err
 }
 info := d.Info()       // SampleRate, Channels, Profile, valid immediately
@@ -163,10 +168,13 @@ _, err = io.Copy(w, d) // WriteTo drains the whole decode; Read fills any buffer
 ```
 
 The decoded PCM is byte-identical to `ffmpeg -c:a aac_fixed -f s16le` on every
-LC stream tested, including Apple afconvert output. The decoder never panics on
-malformed input (it returns wrapped `ErrCorruptStream` or `ErrUnsupported`
-sentinels) and runs at zero allocations per frame in steady state. Raw access
-units plus an `AudioSpecificConfig` are opt in via `aacpcm.WithRawStream(asc)`.
+LC stream tested, including Apple afconvert output, from 8 kHz up to 96 kHz.
+The decoder never panics on malformed input (it returns wrapped
+`ErrCorruptStream` or `ErrUnsupported` sentinels, with `ErrUnsupportedSBR` /
+`ErrUnsupportedPS` naming HE-AAC and HE-AACv2 specifically so a caller can hand
+those off to an external decoder) and runs at zero allocations per frame in
+steady state. Raw access units plus an `AudioSpecificConfig` are opt in via
+`aacpcm.WithRawStream(asc)`.
 
 ### aac: the low-level codec
 
