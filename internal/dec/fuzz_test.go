@@ -13,6 +13,12 @@ import (
 func FuzzParseADTS(f *testing.F) {
 	f.Add([]byte{0xff, 0xf1, 0x4c, 0x80, 0x0d, 0x3f, 0xfc})
 	f.Add([]byte{0xff, 0xf9, 0x50, 0x40, 0x01, 0x7f, 0xfc, 0xde, 0xad})
+	// CRC-present header (protection_absent == 0) carries two extra bytes.
+	f.Add([]byte{0xff, 0xf0, 0x4c, 0x80, 0x0d, 0x3f, 0xfc, 0x00, 0x00})
+	// A reserved sample_frequency_index (13) the parser must reject. 0x74 keeps
+	// the AAC-LC profile bits and encodes index 13 (0x6c would be index 11, a
+	// valid rate that does not exercise the reject path).
+	f.Add([]byte{0xff, 0xf1, 0x74, 0x80, 0x0d, 0x3f, 0xfc})
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {
 		h, err := ParseADTS(bits.NewReader(data))
