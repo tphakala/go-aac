@@ -191,6 +191,12 @@ func (d *Decoder) Info() Info { return d.info }
 // io.EOF at a clean frame boundary (nothing left) and ErrCorruptStream when
 // the input ends mid-header.
 func (d *Decoder) syncADTS() (dec.ADTSHeader, error) {
+	// scanned records whether this call has discarded any bytes looking for a
+	// syncword. A header parsed on the first iteration sits at a trusted,
+	// consumed-to frame boundary and is accepted as-is; a header found only
+	// after scanning past garbage is confirmed by confirmChain before locking,
+	// so a false 0xFFF inside payload cannot desync a lossy stream.
+	scanned := false
 	for {
 		hdr, err := d.br.Peek(dec.ADTSHeaderSize)
 		if err != nil {
@@ -214,12 +220,67 @@ func (d *Decoder) syncADTS() (dec.ADTSHeader, error) {
 		}
 		h, perr := dec.ParseADTSHeaderBytes(hdr)
 		if perr == nil {
-			return h, nil
+			if !scanned {
+				return h, nil // trusted boundary: accept without confirmation
+			}
+			ok, cerr := d.confirmChain(h)
+			if cerr != nil {
+				return dec.ADTSHeader{}, cerr
+			}
+			if ok {
+				return h, nil
+			}
+			// A parseable header that does not chain to a real frame boundary is
+			// a false syncword inside payload; advance one byte and keep scanning.
 		}
 		if _, derr := d.br.Discard(1); derr != nil {
 			return dec.ADTSHeader{}, fmt.Errorf("%w: no ADTS syncword found", ErrCorruptStream)
 		}
+		scanned = true
 	}
+}
+
+// confirmChain validates a candidate ADTS header found while scanning past
+// garbage: it confirms the candidate's frame length chains to another plausible
+// header (or a clean end of stream) before the framer locks onto it. This
+// rejects a false syncword, a 0xFFF pattern inside frame payload that parses as
+// a header in isolation but whose FrameLength does not land on a real frame
+// boundary, which would otherwise desync a lossy live stream. Only scanned
+// candidates are routed here; a header at a trusted, consumed-to boundary is
+// accepted directly by syncADTS, so a true frame immediately followed by a
+// short run of garbage (recovered at its own trusted boundary) is never
+// second-guessed.
+//
+// It peeks FrameLength+ADTSHeaderSize bytes without consuming. FrameLength is at
+// most 8191 (the 13-bit ADTS field), so peekN is well under the 64 KiB bufio
+// buffer and a short peek is always a genuine end of input, never
+// bufio.ErrBufferFull. The peeked frame body is exactly what nextFrameADTS reads
+// next, so confirmation adds no extra read from the underlying stream.
+func (d *Decoder) confirmChain(h dec.ADTSHeader) (bool, error) {
+	peekN := h.FrameLength + dec.ADTSHeaderSize
+	ahead, err := d.br.Peek(peekN)
+	if len(ahead) >= peekN {
+		// The whole candidate frame plus a full next header are buffered: the
+		// byte at FrameLength must itself begin a valid header, or the candidate
+		// is a false sync inside payload. FrameLength spans any optional 2-byte
+		// CRC (it is the whole-frame aac_frame_length), so the next header is at
+		// exactly this offset regardless of CRC presence. A parse failure is a
+		// rejection, not a propagated error.
+		_, chainErr := dec.ParseADTSHeaderBytes(ahead[h.FrameLength:])
+		return chainErr == nil, nil
+	}
+	if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		// A genuine reader error inside the lookahead is surfaced unchanged,
+		// mirroring syncADTS's own reader-error handling.
+		return false, err
+	}
+	// The lookahead window runs into end of input. Accept the candidate: either
+	// the whole final frame is present (whatever trails it is classified by the
+	// next syncADTS call's short-read handling) or the candidate frame is itself
+	// truncated at EOF, in which case nextFrameADTS's io.ReadFull surfaces it as
+	// ErrCorruptStream. peekN is under the buffer size, so this is never a
+	// buffer-full short read.
+	return true, nil
 }
 
 // bytesContainSyncStart reports whether buf could be the prefix of an ADTS
