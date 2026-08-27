@@ -77,12 +77,12 @@ func ParseASC(asc []byte) (Config, error) {
 		c.SBR = 1
 		_, _ = getSampleRate(r) // extension sample rate
 		c.ObjectType = getObjectType(r)
-		name := "SBR"
+		base := ErrUnsupportedSBR
 		if wrapper == aotPS {
-			name = "PS"
+			base = ErrUnsupportedPS
 		}
-		return c, fmt.Errorf("%w: explicitly signalled %s (object type %d over %d)",
-			ErrUnsupported, name, wrapper, c.ObjectType)
+		return c, fmt.Errorf("%w: explicit object type %d over %d",
+			base, wrapper, c.ObjectType)
 	}
 	if c.ObjectType != aotAACLC {
 		return c, fmt.Errorf("%w: audio object type %d (only AAC-LC is supported)",
@@ -146,8 +146,13 @@ func ParseASC(asc []byte) (Config, error) {
 	if err := r2.Err(); err != nil {
 		return c, fmt.Errorf("%w: truncated AudioSpecificConfig", ErrInvalidData)
 	}
-	if c.SBR == 1 {
-		return c, fmt.Errorf("%w: sync-extension signalled SBR", ErrUnsupported)
+	// A signalled PS bit with SBR reset to -1 (extension rate == core rate)
+	// still means HE-AACv2, so gate on either flag, not SBR alone.
+	if c.SBR == 1 || c.PS == 1 {
+		if c.PS == 1 {
+			return c, fmt.Errorf("%w: via sync extension", ErrUnsupportedPS)
+		}
+		return c, fmt.Errorf("%w: via sync extension", ErrUnsupportedSBR)
 	}
 	if c.FrameLenShort {
 		return c, fmt.Errorf("%w: 960-sample frames", ErrUnsupported)

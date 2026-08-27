@@ -297,7 +297,7 @@ func skipFillElement(r *bits.Reader, cnt int) error {
 	if cnt > 0 {
 		// First payload only; see the scope note above.
 		if t := r.Peek(4); t == extSBRData || t == extSBRDataCRC {
-			return fmt.Errorf("%w: SBR extension payload (HE-AAC)", ErrUnsupported)
+			return fmt.Errorf("%w: fill-element payload", ErrUnsupportedSBR)
 		}
 	}
 	r.Skip(8 * cnt)

@@ -26,6 +26,18 @@ var (
 	// support yet (non-LC object types, channel configs > 2, PCE, CCE,
 	// 960-sample frames, mid-stream config changes).
 	ErrUnsupported = errors.New("dec: unsupported")
+	// ErrUnsupportedSBR reports HE-AAC (AAC-LC + SBR): the stream signals SBR
+	// in the AudioSpecificConfig or a leading fill element. It wraps
+	// ErrUnsupported, and ErrUnsupportedPS wraps it in turn, so a caller can
+	// test errors.Is(err, ErrUnsupportedSBR) to catch the whole HE-AAC family
+	// (SBR and SBR+PS) and fall back to an external decoder deliberately.
+	ErrUnsupportedSBR = fmt.Errorf("%w: SBR (HE-AAC)", ErrUnsupported)
+	// ErrUnsupportedPS reports HE-AACv2 (AAC-LC + SBR + PS). Because PS implies
+	// SBR it wraps ErrUnsupportedSBR (and thus ErrUnsupported); test
+	// ErrUnsupportedPS to distinguish HE-AACv2 from plain HE-AAC. PS is
+	// detected only when signalled in the ASC; an ADTS HE-AACv2 stream whose
+	// SBR is found in a fill element surfaces as ErrUnsupportedSBR.
+	ErrUnsupportedPS = fmt.Errorf("%w + PS (HE-AACv2)", ErrUnsupportedSBR)
 )
 
 // Raw data block element types. Mirror enum RawDataBlockType
