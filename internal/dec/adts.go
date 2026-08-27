@@ -78,6 +78,15 @@ func ParseADTS(r *bits.Reader) (ADTSHeader, error) {
 // FindSync returns the offset of the next plausible ADTS frame at or after
 // pos: a 12-bit syncword whose header parses. Returns -1 if none is found.
 // Mirrors the resynchronization scan of the ADTS parser layer.
+//
+// This is a single-header scanner over a whole in-memory slice, used only by
+// tests that split trusted, committed corpus streams where every 0xFFF is a
+// real frame boundary. It deliberately does NOT chain-validate a candidate
+// against the following header: the production streaming resync that must
+// reject a false 0xFFF inside payload on a lossy transport lives in
+// pcm.(*Decoder).syncADTS and its confirmChain helper, which have the bufio
+// Peek/EOF context this slice scanner does not. Keep the two separate; do not
+// port the hardening here without a non-test caller that needs it.
 func FindSync(buf []byte, pos int) int {
 	if pos < 0 {
 		pos = 0 // "at or after pos" from before the buffer means from the start
