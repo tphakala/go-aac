@@ -225,18 +225,19 @@ on that hybrid part; the Pi 5 is a single core cluster and needs no pinning.
 
 | Coder | Platform | go-aac | FFmpeg | go/C |
 | ----- | -------- | -----: | -----: | ---: |
-| NMR (default) | Raspberry Pi 5 | 38x realtime | 40x | 1.04x |
-| NMR (default) | x86_64 (i7-1260P) | 86x | 86x | 0.93x |
-| twoloop | Raspberry Pi 5 | 41x | 75x | 1.71x |
-| twoloop | x86_64 (i7-1260P) | 99x | 144x | 1.31x |
-| fast | Raspberry Pi 5 | 90x | 162x | 1.65x |
-| fast | x86_64 (i7-1260P) | 195x | 284x | 1.27x |
+| NMR (default) | Raspberry Pi 5 | 38x realtime | 38x | 1.02x |
+| NMR (default) | x86_64 (i7-1260P) | 90x | 99x | 1.12x |
+| twoloop | Raspberry Pi 5 | 42x | 69x | 1.65x |
+| twoloop | x86_64 (i7-1260P) | 105x | 164x | 1.57x |
+| fast | Raspberry Pi 5 | 90x | 138x | 1.53x |
+| fast | x86_64 (i7-1260P) | 203x | 308x | 1.55x |
 
-On the default NMR coder go-aac now runs **at or near parity** with the C in CPU
-time (0.93x on the i7-1260P, 1.04x on the Pi 5), in **about a third of the
-memory** (roughly 4 MB peak RSS against about 12 MB). The twoloop and fast
-coders stay modestly behind, roughly 1.3x on x86_64 and 1.65x to 1.71x on the
-Pi. Stream sizes track FFmpeg closely at the same bitrate, within about 0.001%
+On the default NMR coder go-aac is **at parity** with the C in CPU time on the
+Pi 5 (1.02x) and within about 12% of it on the i7-1260P (1.12x), in **a third
+to a half of the memory** (roughly 4 MB peak RSS on the Pi and 6 to 8 MB on
+x86_64, against about 12 to 15 MB). The twoloop and fast coders stay modestly
+behind, roughly 1.5x to 1.65x on both platforms. Stream sizes track FFmpeg
+closely at the same bitrate, within about 0.001%
 for NMR and on the order of 0.01% for the other coders. These numbers moved a
 long way from the first baseline, where the NMR coder cost about twice the C's
 CPU time; the default SIMD kernels and the scalar-path work since then roughly
