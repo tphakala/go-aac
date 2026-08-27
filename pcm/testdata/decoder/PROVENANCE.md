@@ -14,8 +14,9 @@ output.
 
 `tone_{m,s}<rate>.adts` are short 440 Hz sine tones that complete the AAC-LC
 low-rate decode matrix (8/11.025/12/16/22.05/24/32 kHz, mono `m` and stereo
-`s`). They exist to prove the decoder handles the full MPEG-4 sample-rate
-table, not only 44.1/48 kHz. `sine_m8_24k` (8 kHz mono) and `is_s22_48k_fast`
+`s`). They exist to prove the decoder handles AAC-LC at the low sample rates
+(8 to 32 kHz) that camera and stream sources commonly emit, not only
+44.1/48 kHz. `sine_m8_24k` (8 kHz mono) and `is_s22_48k_fast`
 (22.05 kHz stereo) predate this set and cover their two cells.
 
 Generated with the native (LC-only, no SBR) FFmpeg `aac` encoder:
