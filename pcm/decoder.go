@@ -280,6 +280,17 @@ func (d *Decoder) confirmChain(h dec.ADTSHeader) (bool, error) {
 	// truncated at EOF, in which case nextFrameADTS's io.ReadFull surfaces it as
 	// ErrCorruptStream. peekN is under the buffer size, so this is never a
 	// buffer-full short read.
+	//
+	// Known residual gap: a false syncword within the final bytes of the stream,
+	// whose claimed FrameLength happens to fit before EOF, is also accepted here.
+	// It cannot be told apart from a genuine last frame without a following
+	// header to chain to, and rejecting it would drop legitimate final frames.
+	// The exposure is bounded: it only reaches the stream tail (a live feed keeps
+	// the buffer full, so mid-stream candidates chain against real following
+	// data), and the AAC layer rejects a garbage payload as ErrCorruptStream, so
+	// only bytes that happen to form syntactically valid AAC could decode. A
+	// strict caller that must close this would defer acceptance until the frame
+	// decode itself succeeds.
 	return true, nil
 }
 
