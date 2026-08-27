@@ -28,7 +28,22 @@ var (
 	// scope (non-LC object types, channel configs > 2, SBR/PS, 960-sample
 	// frames, mid-stream config changes).
 	ErrUnsupported = errors.New("go-aac/pcm: unsupported stream")
+	// ErrUnsupportedSBR reports HE-AAC (AAC-LC + SBR), signalled in the ASC or
+	// a leading fill element. It wraps ErrUnsupported, and ErrUnsupportedPS
+	// wraps it in turn, so errors.Is(err, ErrUnsupportedSBR) catches the whole
+	// HE-AAC family (SBR and SBR+PS); test it to hand the stream to an external
+	// decoder deliberately.
+	ErrUnsupportedSBR = fmt.Errorf("%w: SBR (HE-AAC)", ErrUnsupported)
+	// ErrUnsupportedPS reports HE-AACv2 (AAC-LC + SBR + PS). Because PS implies
+	// SBR it wraps ErrUnsupportedSBR (and thus ErrUnsupported); test
+	// ErrUnsupportedPS to distinguish HE-AACv2 from plain HE-AAC. PS is
+	// detected only from ASC signalling; an ADTS HE-AACv2 stream surfaces as
+	// ErrUnsupportedSBR.
+	ErrUnsupportedPS = fmt.Errorf("%w + PS (HE-AACv2)", ErrUnsupportedSBR)
 )
+
+// profileAACLC is the sole decoder profile in v1; Info.Profile is always this.
+const profileAACLC = "AAC-LC"
 
 // Info describes the decoded stream, populated at construction.
 type Info struct {
@@ -121,7 +136,7 @@ func (d *Decoder) Reset(r io.Reader, opts ...Option) error {
 			return d.err
 		}
 		cfg := d.dec.Config()
-		d.info = Info{SampleRate: cfg.SampleRate, Channels: cfg.ChanConfig, Profile: "AAC-LC"}
+		d.info = Info{SampleRate: cfg.SampleRate, Channels: cfg.ChanConfig, Profile: profileAACLC}
 		return nil
 	}
 
@@ -139,7 +154,7 @@ func (d *Decoder) Reset(r io.Reader, opts ...Option) error {
 		}
 		return d.err
 	}
-	d.info = Info{SampleRate: h.SampleRate, Channels: h.ChanConfig, Profile: "AAC-LC"}
+	d.info = Info{SampleRate: h.SampleRate, Channels: h.ChanConfig, Profile: profileAACLC}
 	return nil
 }
 
@@ -365,6 +380,10 @@ func mapErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, dec.ErrUnsupportedPS):
+		return fmt.Errorf("%w: %w", ErrUnsupportedPS, err)
+	case errors.Is(err, dec.ErrUnsupportedSBR):
+		return fmt.Errorf("%w: %w", ErrUnsupportedSBR, err)
 	case errors.Is(err, dec.ErrUnsupported):
 		return fmt.Errorf("%w: %w", ErrUnsupported, err)
 	case errors.Is(err, dec.ErrSync), errors.Is(err, dec.ErrInvalidData):
