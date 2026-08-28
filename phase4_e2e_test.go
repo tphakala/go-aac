@@ -98,15 +98,29 @@ const (
 // checkGateVsC scores one Go stream against the C stream produced from the
 // same source at the same settings: stream size, then decoded PSNR per
 // channel. Both streams are decoded by the same pinned ffmpeg, so the decoder
-// cancels out and what is left is the encoders' difference. cStream must
-// already be written to dir/c.adts, which is where cEncodeArgs puts it.
+// cancels out and what is left is the encoders' difference. cPath is the C
+// stream on disk (where cEncodeArgs wrote it); it is read once here, so the
+// size comparison and the PSNR comparison score the SAME bytes rather than one
+// in-memory copy for size and a re-read of the file for PSNR.
 //
-// It deliberately does NOT call t.Helper(): it makes three distinct
-// assertions, and marking it a helper reports all of them at the single call
+// It deliberately does NOT call t.Helper(): it makes four distinct assertions
+// (the empty-stream precondition, size, mean PSNR and worst-channel PSNR), and
+// marking it a helper reports all of them at the single call
 // site instead of at the line that actually failed.
 //
 //nolint:thelper // this is the gate body for one cell, not an assertion wrapper
-func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream, cStream []byte) {
+func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []byte, cPath string) {
+	cStream, err := os.ReadFile(cPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A gate scored against an empty stream is no gate: an empty cStream makes
+	// sizeDelta NaN, and math.Abs(NaN) > bound is false, so every size check
+	// would pass silently. Reject either side being empty up front.
+	if len(goStream) == 0 || len(cStream) == 0 {
+		t.Fatalf("empty stream, cannot gate: Go %d bytes, C %d bytes (%s)",
+			len(goStream), len(cStream), cPath)
+	}
 	sizeDelta := 100 * (float64(len(goStream)) - float64(len(cStream))) /
 		float64(len(cStream))
 	if math.Abs(sizeDelta) > gateSizeBound {
@@ -122,7 +136,7 @@ func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream, c
 	worstDelta := math.Inf(1)
 	meanDelta := 0.0
 	decG := ffmpegDecode(t, ffmpeg, goPath)
-	decC := ffmpegDecode(t, ffmpeg, filepath.Join(dir, "c.adts"))
+	decC := ffmpegDecode(t, ffmpeg, cPath)
 	for c := range 2 {
 		dg := make([]float32, len(decG)/2)
 		dc := make([]float32, len(decC)/2)
@@ -179,13 +193,14 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 					dir := t.TempDir()
 					rawPath := filepath.Join(dir, "src.f32")
 					writeRawF32(t, rawPath, sig.src)
-					cStream := cEncodeTools(t, ffmpeg, rawPath, 44100, 2, br,
-						coder.name, filepath.Join(dir, "c.adts"))
+					cPath := filepath.Join(dir, "c.adts")
+					cEncodeTools(t, ffmpeg, rawPath, 44100, 2, br,
+						coder.name, cPath)
 					goStream := encodeADTSPlanar(t,
 						enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2,
 							Coder: coder.kind}, sig.src)
 
-					checkGateVsC(t, ffmpeg, dir, sig.src, goStream, cStream)
+					checkGateVsC(t, ffmpeg, dir, sig.src, goStream, cPath)
 				})
 			}
 		}
@@ -319,20 +334,26 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 // ignored under the coder that is both the zero value and the recommendation.
 //
 // The C reads them at three sites inside nmr_decide_stereo (aacenc.c:731,
-// 769-770 and 787) and a fourth guarding the call (aacenc.c:1216-1217). The
-// neither case is the one that pins that fourth site: there the C skips
-// nmr_decide_stereo entirely, and with it the PNS-stereo reservation that
-// clears CanPNS on bands that are not noise-like in both channels. A port that
-// ran the function anyway would agree on the stereo decision, which is empty
-// either way, and diverge on which bands survive as PNS.
+// 769-770 and 787) and a fourth guarding the call (aacenc.c:1216-1217). That
+// fourth site is where the C decides whether to skip nmr_decide_stereo
+// entirely, and with it the PNS-stereo reservation that keeps a stereo PNS band
+// only where it is clearly decorrelated and clears CanPNS on the rest (the
+// noise-like-in-both intersection having already run before the call). A port
+// that ran the function anyway would agree on the stereo decision, which is
+// empty either way, and diverge on which bands survive as PNS. This oracle cell
+// does NOT pin that fourth site, though: the neither case PASSES under a
+// deleted-term mutation of the go-aac guard at -0.06% size, well inside the 3%
+// bound. TestNMRStereoGuardWiring (tool_wiring_test.go) is what pins that
+// case. The other mutation of the same guard, `||` to `&&`, DOES fail here,
+// on the nois cell, at +65% stream size.
 //
 // The cells do not carry equal weight, and it is worth saying which. Measured
 // against the unfixed encoder, noms and neither both miss the C's stream size
 // by about 39.5%, so they are what gates the fix. nois misses by only 0.16%
-// and PASSES unfixed, because I/S reaches just 30 of the roughly 2100 coded
-// pair-bands on this corpus at this rate: too small an effect for a 3% size
-// bound to see. It is kept as corroboration that Go and C agree with the tool
-// off, not as the gate. TestEncoderToolWiring (tool_wiring_test.go) is the
+// and PASSES unfixed, because I/S reaches just 333 of the roughly thirty
+// thousand coded pair-bands on this corpus at this rate (about 1%): too small
+// an effect for a 3% size bound to see. It is kept as corroboration that Go
+// and C agree with the tool off, not as the gate. TestEncoderToolWiring (tool_wiring_test.go) is the
 // gate for DisableIS, because a counter that must reach exactly zero does not
 // care how many bands the tool would have claimed.
 //
@@ -341,9 +362,10 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 // carries the rate sweep at the tool defaults.
 func TestPhase4NMRStereoSwitchesVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	casta := synthCastanets(44100*gateCastanetSecs, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*gateCastanetSecs, 44100, 0x5eed1234, 137)
-	src := [][]float32{casta, castaR}
+	// castanetsChannels is the single generator for this corpus (see its doc
+	// in arch_determinism_test.go); use it rather than open-coding the seeds so
+	// this gate cannot drift from the corpus every sibling gate scores against.
+	src := castanetsChannels(archChanStereo, 44100, 44100*gateCastanetSecs)
 	const bitrate = 128000
 
 	for _, tc := range []struct {
@@ -364,15 +386,15 @@ func TestPhase4NMRStereoSwitchesVsC(t *testing.T) {
 			rawPath := filepath.Join(dir, "src.f32")
 			writeRawF32(t, rawPath, src)
 			args := append([]string{"-aac_coder", coderNMR}, tc.cArgs...)
-			cStream := cEncodeArgs(t, ffmpeg, rawPath, 44100, 2, bitrate,
-				filepath.Join(dir, "c.adts"), args...)
+			cPath := filepath.Join(dir, "c.adts")
+			cEncodeArgs(t, ffmpeg, rawPath, 44100, 2, bitrate, cPath, args...)
 
 			cfg := tc.cfg
 			cfg.SampleRate, cfg.Bitrate, cfg.Channels = 44100, bitrate, 2
 			cfg.Coder = enc.CoderNMR
 			goStream := encodeADTSPlanar(t, cfg, src)
 
-			checkGateVsC(t, ffmpeg, dir, src, goStream, cStream)
+			checkGateVsC(t, ffmpeg, dir, src, goStream, cPath)
 		})
 	}
 }

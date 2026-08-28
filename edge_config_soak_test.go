@@ -364,9 +364,13 @@ func TestEncoderMidSideWiring(t *testing.T) {
 				on, onASC := encodeCollect(t, base, src)
 				off, offASC := encodeCollect(t, noMS, src)
 
-				// Both streams must exist before they are compared: two empty
-				// slices compare equal, which would make the wantEqual case
-				// pass without either encode having produced anything.
+				// Both streams must carry the expected number of access units
+				// before they are compared. The loop below indexes off by on's
+				// length, so an empty on leaves equal true and fails with the
+				// misleading "DisableMS left the bitstream unchanged" message,
+				// while an empty off panics on the index instead. Either way the
+				// real fault, an encode that produced no output, is not what gets
+				// reported, so it is checked here.
 				want := len(src[0])/FrameSize + 1
 				if len(on) != want || len(off) != want {
 					t.Fatalf("emitted %d access units with M/S and %d without, want %d each",

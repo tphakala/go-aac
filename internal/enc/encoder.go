@@ -628,7 +628,8 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 		// 1 force all) of which the public API spells only auto and off; the
 		// C's force-all is aac_ms 1 and has no Go equivalent. The C also
 		// forces mid_side off above three channels (aacenc.c:1588), which is
-		// unreachable here because validate rejects any count outside 1..2.
+		// unreachable here because (*Encoder).Reset rejects any channel count
+		// outside 1..2.
 		midSide := -1
 		if e.cfg.DisableMS {
 			midSide = 0
@@ -636,10 +637,16 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 		intensityStereo := !e.cfg.DisableIS
 		// The options term in the guard mirrors aacenc.c:1216-1217 and is
 		// load-bearing rather than a shortcut past a decision that would come
-		// out empty: nmrDecideStereo also runs the PNS-stereo reservation,
-		// which clears CanPNS on every band that is not noise-like in both
-		// channels. Calling it with both tools off would keep that side effect
-		// while dropping the decision it belongs to.
+		// out empty: nmrDecideStereo also runs the PNS-stereo reservation
+		// (stereo.go), which KEEPS a stereo PNS band only where it is both
+		// noise-like in both channels AND clearly decorrelated
+		// (esTot > nmrPNSStereoDecorr*emTot), clearing CanPNS everywhere else.
+		// The noise-like-in-both intersection already ran above (the CanPNS
+		// AND-loop after the two MarkPNS calls), so the term that actually
+		// distinguishes here is the decorrelation test. Calling nmrDecideStereo
+		// with both tools off would keep that side effect, dropping CanPNS on
+		// every band that is not clearly decorrelated, while dropping the stereo
+		// decision it belongs to.
 		if chans == 2 && cpe.CommonWindow != 0 && e.cfg.Coder == CoderNMR &&
 			(midSide != 0 || intensityStereo) {
 			nmrDecideStereo(stereoInput{
@@ -657,14 +664,40 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			// non-NMR coders mark PNS candidacy just before the search
 			// (aacenc.c:1223-1225); the NMR path marked it above.
 			//
-			// The DisablePNS term here is redundant: on this arm SearchForPNS
-			// is what sets NoiseBT, and it does so from the psy model without
-			// consulting CanPNS, so gating it below is what makes the switch
-			// observable. Mutation testing confirms this read is unreachable
-			// (issue #93). It is kept because aacenc.c:1224 reads
-			// s->options.pns in the same place, and a guard dropped for being
-			// redundant today is a divergence the next re-port has to
-			// rediscover.
+			// The DisablePNS term here is LOAD-BEARING, not redundant, and it
+			// executes on every non-NMR frame. MarkPNS is what populates
+			// CanPNS, and internal/coder/twoloop.go then reads sce.CanPNS at
+			// :23, :193, :320 and :402 with NO gate on the pns argument (only
+			// :460 and :491 sit inside the pns-gated block at :433). So letting
+			// MarkPNS fill CanPNS while PNS is off shifts tbits and moves the
+			// rate loop to a different solution.
+			//
+			// Reproduced on the in-repo castanets corpus, so a reader can rerun
+			// it: build the input with
+			// castanetsChannels(<layout>, 44100, (44100*2/FrameSize)*FrameSize)
+			// and DisablePNS true, then remove ONLY the "!e.cfg.DisablePNS &&"
+			// from this guard. The stream then changes at:
+			//   mono   CoderTwoLoop 32 kb/s: 7664 -> 7660 bytes (differs)
+			//   stereo CoderTwoLoop 32 kb/s: 8667 bytes, content differs
+			//   stereo CoderTwoLoop 64 kb/s: 16991 -> 17000 bytes (differs)
+			// Every CoderFast cell, and both coders at 128 kb/s, stay byte-
+			// identical, but the differing cells prove castanets DOES yield PNS
+			// candidates. The earlier "no PNS candidates at all" claim was false.
+			//
+			// The issue #93 mutant survives despite that reproduction because of
+			// the ASSERTION SHAPE, not the corpus. TestEncoderToolWiring's pns
+			// gate asserts PNSBands is 0 with the switch SET; under the mutant it
+			// is still 0, because SearchForPNS is gated separately and is what
+			// sets NoiseBT. Its other assertion only requires the switch-on and
+			// switch-off bitstreams to DIFFER, and they still do: with the switch
+			// clear this term is already true, so the mutation cannot touch that
+			// side at all, and it moves only the switch-set side. Neither
+			// assertion pins either side's bytes to anything, so neither can
+			// observe the shift. Swapping the
+			// corpus would NOT close this gap: mono_32000 is already a pns cell
+			// and already differs above, yet the gate stays green. That is a
+			// COVERAGE GAP in the assertion, not unreachability; issue #93's
+			// premise is wrong for this guard, and it must NOT be deleted.
 			if !e.cfg.DisablePNS && !tnsFirst {
 				if e.trace != nil {
 					e.trace = append(e.trace, "mark_pns")
@@ -693,13 +726,18 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 				e.cd.SearchForQuantizersNMR(in, e.nmr, &cpe.Ch[ch],
 					&e.psy.Ch[ch].PsyBands, e.lambda)
 			case CoderTwoLoop:
-				// The pns argument is redundant for the same reason as the
-				// MarkPNS guard above: the band-trading loop it gates only ever
-				// zeroes bands that CanPNS already admits, and SearchForPNS
-				// below decides NoiseBT regardless. Mutation testing confirms
-				// it is unreachable (issue #93); it mirrors the
-				// s->options.pns read at aaccoder_twoloop.h:475 and stays for
-				// that reason.
+				// The pns argument (aaccoder_twoloop.h:475's s->options.pns)
+				// gates only the band-trading loop at twoloop.go:433, which
+				// zeroes bands that CanPNS already admits. It is inert TODAY,
+				// but only BECAUSE the MarkPNS guard above holds CanPNS
+				// all-false whenever DisablePNS is set: with no CanPNS bit set,
+				// the gated loop has nothing to trade, so the argument cannot
+				// change the outcome. The two are interlocked. Dropping this
+				// argument alone is safe only while that guard stands; dropping
+				// BOTH together lets MarkPNS fill CanPNS with PNS off and then
+				// lets the gated loop act on it, which DOES change the stream.
+				// The reproduction above establishes the MarkPNS half of that;
+				// dropping the argument as well only widens it. Keep both.
 				e.cd.SearchForQuantizersTwoLoop(e.cfg.Bitrate, e.cfg.SampleRate,
 					e.cfg.Channels, e.psy.Bitres.Alloc, e.bandwidth,
 					!e.cfg.DisablePNS, &cpe.Ch[ch], &e.psy.Ch[ch].PsyBands, e.lambda)
