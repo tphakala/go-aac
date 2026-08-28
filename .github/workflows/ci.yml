@@ -84,15 +84,44 @@ jobs:
       - name: Run tests (noasm)
         run: go test -race -timeout 20m -tags noasm ./...
 
+      # The non-race pass. Until this step existed, the ONLY non-race lane was
+      # the differential-oracle job, which is ubuntu-latest, so every test whose
+      # coverage differs between the two builds ran on amd64 alone. Three of
+      # those differences matter: TestEncoderEdgeConfigSoak drops its two
+      # in-range bitrate points under -race (edge_soak_race_test.go),
+      # TestEncoderToolWiring is skipped there outright, and pcm's
+      # TestEncodeInterleavedReuseAllocs drops its zero-allocation bound to an
+      # unenforced sentinel (pcm/raceflag_race_test.go). Only the tool-wiring
+      # gate had never run at all on arm64 or Windows; the other two ran there
+      # in reduced form, so what was missing is the extra bitrate points and the
+      # enforced allocation bound.
+      #
+      # It runs the whole suite rather than a -run filter naming those tests,
+      # because a hand-maintained filter drifts: the next test that shortens
+      # under -race would silently miss this lane again. Measured at about 20 s,
+      # against roughly 2 minutes for the race lane it sits beside.
+      #
+      # On ubuntu this overlaps the oracle job's first pass, which runs the same
+      # suite with the oracle env and so covers strictly more (it differs only in
+      # lacking an explicit -timeout). That overlap is deliberate rather than an
+      # oversight: the oracle job can fail while
+      # building FFmpeg, for reasons that have nothing to do with the suite, and
+      # this step is what keeps a non-race regression visible when it does.
+      - name: Run tests (no race)
+        run: go test -count=1 -timeout 20m ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Lint the default build and the noasm build; each build's tagged files
-        # are only compiled (and so only linted) under that build.
-        tags: ['', 'noasm']
+        # Lint each build separately; a build's tagged files are only compiled,
+        # and so only linted, under that build. race is here because
+        # edge_soak_race_test.go and pcm/raceflag_race_test.go are invisible to
+        # both other legs: nothing else in CI ever compiles them with a linter
+        # attached, since the race test steps run the compiler, not golangci-lint.
+        tags: ['', 'noasm', 'race']
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -129,6 +158,13 @@ jobs:
         env:
           GOARCH: ${{ matrix.goarch }}
         run: go vet -tags noasm ./...
+
+      # Same reason as the lint job's race leg: without this, the race-tagged
+      # files are never vetted at all.
+      - name: Run go vet (race)
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: go vet -tags race ./...
 
   build:
     name: Build
@@ -302,3 +338,38 @@ jobs:
           GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
           GOAAC_REQUIRE_ORACLE=1 \
             go test -count=1 -tags noasm ./...
+          # The third build state: SIMD compiled IN, but selected OFF at
+          # runtime. This is what a pre-AVX2 amd64 host runs, and neither pass
+          # above reaches it. The default pass takes the vectorised path, and
+          # -tags noasm compiles the dispatch out entirely and links no simd
+          # code, so it exercises this package's own scalar files rather than
+          # the fallback loops inside the simd dependency that such a host would
+          # actually execute. SIMD_DISABLE=all masks the detected features
+          # (github.com/tphakala/simd cpu/cpu_amd64.go), so this pass gates that
+          # path against the same oracle, and TestEncoderArchDeterminism's
+          # SHA-256 goldens against the same bytes.
+          #
+          # TestSIMDDisableEnvIsHonoured asserts the masking really happened, so
+          # this cannot decay into a third copy of the default pass if the
+          # dependency ever drops the variable.
+          SIMD_DISABLE=all \
+          GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
+          GOAAC_REQUIRE_ORACLE=1 \
+            go test -count=1 ./...
+
+      # The pass above is only worth running if the masking actually happened,
+      # and TestSIMDDisableEnvIsHonoured SKIPS when it did not. A skip keeps the
+      # step green, so deleting the SIMD_DISABLE line above would silently turn
+      # that pass into a third copy of the default one with nothing to say so.
+      # This requires a PASS specifically, which a skip cannot satisfy.
+      - name: Prove the SIMD fallback lane actually masked the features
+        run: |
+          set -euo pipefail
+          # tee to a file and grep the FILE, not the pipe. `grep -q` exits on its
+          # first match, which would SIGPIPE the upstream tee and, under
+          # pipefail, fail this step with 141 on exactly the runs that should
+          # pass. Measured here: the pipe form exited 141 on 8 of 10 runs that
+          # should have passed.
+          SIMD_DISABLE=all go test -count=1 -v -run TestSIMDDisableEnvIsHonoured ./ |
+            tee "$RUNNER_TEMP/simd-guard.log"
+          grep -q '^--- PASS: TestSIMDDisableEnvIsHonoured' "$RUNNER_TEMP/simd-guard.log"

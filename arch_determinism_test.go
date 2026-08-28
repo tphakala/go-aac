@@ -31,14 +31,39 @@ type archCase struct {
 	bitrate  int
 }
 
-// archCoders is the coder axis shared by the gate and the repro diagnostic.
-var archCoders = []struct {
-	name string
-	kind enc.CoderKind
+// testCoders is THE coder axis for this package: the determinism gate and its
+// repro diagnostic, the edge-config soak, the mid/side gate and the tool-wiring
+// gate all sweep it. Listing it once is the whole point. It used to be restated
+// per test, which meant a fourth coder could be added to one sweep and silently
+// missed by another.
+//
+// It carries the label explicitly because Coder is a bare int with no String
+// method, and it carries the PUBLIC Coder rather than the internal
+// enc.CoderKind because Coder.kind() maps public onto internal and no reverse
+// mapping exists; archCoderKind projects it for the corpus cells that need the
+// internal type.
+var testCoders = []struct {
+	name  string
+	coder Coder
 }{
-	{coderNMR, enc.CoderNMR},
-	{coderTwoLoop, enc.CoderTwoLoop},
-	{coderFast, enc.CoderFast},
+	{coderNMR, CoderNMR},
+	{coderTwoLoop, CoderTwoLoop},
+	{coderFast, CoderFast},
+}
+
+// archCoderKind projects a testCoders entry onto the internal kind the
+// determinism corpus stores. A coder this package lists but Coder.kind()
+// rejects is a bug in this file rather than a caller error, and it must not be
+// swallowed: enc.CoderKind's zero value is enc.CoderNMR, so taking it silently
+// would build three identical NMR cells that still pass the gate. archCases has
+// no *testing.T in scope, so this panics, which fails the test binary just as
+// loudly and points at the cause.
+func archCoderKind(c Coder) enc.CoderKind {
+	kind, ok := c.kind()
+	if !ok {
+		panic(fmt.Sprintf("testCoders holds coder %d, which Coder.kind() rejects", c))
+	}
+	return kind
 }
 
 // archCases enumerates the determinism corpus: the stereo/44100 bitrate sweep,
@@ -78,15 +103,16 @@ var archCoders = []struct {
 // are also, empirically, the gate for the Reset clamp itself: deleting the clamp
 // leaves the edge-config soak green and turns exactly these three red.
 func archCases() []archCase {
-	cases := make([]archCase, 0, len(archCoders)*8)
-	for _, c := range archCoders {
+	cases := make([]archCase, 0, len(testCoders)*8)
+	for _, c := range testCoders {
+		kind := archCoderKind(c.coder)
 		for _, br := range []int{32000, 96000, 128000, 192000, 1000000} {
-			cases = append(cases, archCase{c.name, c.kind, archChanStereo, 2, 44100, br})
+			cases = append(cases, archCase{c.name, kind, archChanStereo, 2, 44100, br})
 		}
 		cases = append(cases,
-			archCase{c.name, c.kind, archChanMono, 1, 44100, 128000},
-			archCase{c.name, c.kind, archChanStereo, 2, 48000, 128000},
-			archCase{c.name, c.kind, archChanMono, 1, 48000, 128000},
+			archCase{c.name, kind, archChanMono, 1, 44100, 128000},
+			archCase{c.name, kind, archChanStereo, 2, 48000, 128000},
+			archCase{c.name, kind, archChanMono, 1, 48000, 128000},
 		)
 	}
 	return cases
