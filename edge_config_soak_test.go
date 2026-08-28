@@ -41,9 +41,12 @@ const maxFrameBitsPerChannel = 6144
 
 // edgeSoakMaxSeconds bounds GOAAC_ENC_SOAK. Sixty seconds per cell is already
 // roughly 48 minutes of audio across the matrix, far past any useful soak, and
-// staying well under 2^31/48000 keeps the frame arithmetic safe on a 32-bit
-// build.
-const edgeSoakMaxSeconds = 600
+// it keeps the whole run near 100 s, comfortably inside Go's default 10-minute
+// per-binary timeout. A larger cap would defeat the point of having one: the
+// bound exists so a mistyped value fails fast instead of blowing that timeout
+// and surfacing as an unreadable stack dump. It also stays well under
+// 2^31/48000, keeping the frame arithmetic safe on a 32-bit build.
+const edgeSoakMaxSeconds = 60
 
 // resetWarmupFrames is how many frames TestEncoderEdgeConfigReset encodes
 // through an encoder before re-arming it, purely to dirty the state Reset must
