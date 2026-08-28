@@ -147,21 +147,30 @@ type EncoderConfig struct {
 
 	// Tool switches are negative (Disable*) so the zero value enables
 	// every tool, matching FFmpeg's defaults: TNS, PNS, M/S and I/S on.
+	// All four reach every coder.
 	//
-	// DisableTNS and DisablePNS apply to every coder. The two stereo
-	// switches do NOT: CoderNMR makes its stereo decision before
-	// quantization, from the psychoacoustic model alone, and that decision
-	// is not gated on either switch. Under CoderNMR, DisableMS is a strict
-	// no-op that cannot change a byte, and DisableIS never disables the
-	// tool; on its own it changes only internal bookkeeping, though set
-	// together with DisablePNS it still narrows the coding bandwidth as
-	// described above. Since CoderNMR is the zero value and the recommended
-	// coder, a caller who needs either tool genuinely off has to select
-	// another coder. The encoder's own test suite pins both no-ops.
+	// Where a coder reads them differs. CoderTwoLoop and CoderFast decide
+	// mid/side and intensity after quantization, so DisableMS and DisableIS
+	// skip those searches. CoderNMR decides both before quantization from
+	// the psychoacoustic model alone, so there the switches feed that
+	// decision instead; with both set it is skipped entirely, as upstream
+	// does. The observable contract is the same either way: the tool does
+	// not appear in the output.
+	//
+	// Note DisableIS also feeds the coding-bandwidth formula, independent of
+	// the stereo decision: the 15% widening is dropped when both DisablePNS
+	// and DisableIS are set, so the pair can narrow the coded bandwidth (I/S
+	// is an option flag read independently of channel count). It changes the
+	// result only where the cutoff formula applies, as described on Coder, and
+	// only where the result is not already clamped. At DefaultBitrate that
+	// means stereo CoderTwoLoop and CoderFast narrow, 19187 to 18250 Hz, while
+	// mono stays at the 22000 Hz cap either way; CoderNMR is unaffected at
+	// either channel count, because at that rate it takes its own rate table
+	// instead of the formula.
 	DisableTNS bool // disable temporal noise shaping
 	DisablePNS bool // disable perceptual noise substitution
-	DisableMS  bool // disable the mid/side stereo search (non-NMR coders)
-	DisableIS  bool // disable intensity stereo (non-NMR coders)
+	DisableMS  bool // disable the mid/side stereo search
+	DisableIS  bool // disable intensity stereo
 }
 
 // validate reports the first config problem, or nil.

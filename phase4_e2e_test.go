@@ -81,6 +81,88 @@ func cEncodeTools(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
 // the C by only about 0.1 dB.
 const gateCastanetSecs = 24
 
+// Phase 4 same-settings bounds, shared by every gate that scores a Go stream
+// against the C stream the same settings produced.
+//
+// M/S and I/S trade quantization error between the two channels, so
+// per-channel PSNR is not stable under a stereo-tool decision flip; the gate
+// is the per-case MEAN delta, with a worst-channel backstop catching a
+// collapse the mean would average away. See gateCastanetSecs for why the
+// reference is reproducible enough to assert against.
+const (
+	gateSizeBound  = 3.0  // percent, absolute
+	gateMeanBound  = -0.5 // dB, mean over channels
+	gateWorstBound = -1.0 // dB, worst channel
+)
+
+// checkGateVsC scores one Go stream against the C stream produced from the
+// same source at the same settings: stream size, then decoded PSNR per
+// channel. Both streams are decoded by the same pinned ffmpeg, so the decoder
+// cancels out and what is left is the encoders' difference. cPath is the C
+// stream on disk (where cEncodeArgs wrote it); it is read once here, so the
+// size comparison and the PSNR comparison score the SAME bytes rather than one
+// in-memory copy for size and a re-read of the file for PSNR.
+//
+// It deliberately does NOT call t.Helper(): it makes four distinct assertions
+// (the empty-stream precondition, size, mean PSNR and worst-channel PSNR), and
+// marking it a helper reports all of them at the single call
+// site instead of at the line that actually failed.
+//
+//nolint:thelper // this is the gate body for one cell, not an assertion wrapper
+func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []byte, cPath string) {
+	cStream, err := os.ReadFile(cPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A gate scored against an empty stream is no gate: an empty cStream makes
+	// sizeDelta NaN, and math.Abs(NaN) > bound is false, so every size check
+	// would pass silently. Reject either side being empty up front.
+	if len(goStream) == 0 || len(cStream) == 0 {
+		t.Fatalf("empty stream, cannot gate: Go %d bytes, C %d bytes (%s)",
+			len(goStream), len(cStream), cPath)
+	}
+	sizeDelta := 100 * (float64(len(goStream)) - float64(len(cStream))) /
+		float64(len(cStream))
+	if math.Abs(sizeDelta) > gateSizeBound {
+		t.Errorf("stream size %+.2f%% vs C, gate demands within %.0f%%",
+			sizeDelta, gateSizeBound)
+	}
+
+	goPath := filepath.Join(dir, "go.adts")
+	if err := os.WriteFile(goPath, goStream, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const delay = 1024
+	worstDelta := math.Inf(1)
+	meanDelta := 0.0
+	decG := ffmpegDecode(t, ffmpeg, goPath)
+	decC := ffmpegDecode(t, ffmpeg, cPath)
+	for c := range 2 {
+		dg := make([]float32, len(decG)/2)
+		dc := make([]float32, len(decC)/2)
+		for i := range dg {
+			dg[i] = decG[i*2+c]
+		}
+		for i := range dc {
+			dc[i] = decC[i*2+c]
+		}
+		pg := psnr(src[c], dg, delay)
+		pc := psnr(src[c], dc, delay)
+		t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
+			c, pg, pc, pg-pc, sizeDelta)
+		worstDelta = math.Min(worstDelta, pg-pc)
+		meanDelta += (pg - pc) / 2
+	}
+	if meanDelta < gateMeanBound {
+		t.Errorf("mean PSNR %.2f dB below the C encoder's, gate allows %.1f dB",
+			meanDelta, gateMeanBound)
+	}
+	if worstDelta < gateWorstBound {
+		t.Errorf("worst-channel PSNR %.2f dB below the C encoder's, backstop is %.1f dB",
+			worstDelta, gateWorstBound)
+	}
+}
+
 // TestPhase4ToolsGateVsC is the Phase 4 gate (issue #6): with TNS, PNS,
 // I/S and M/S active on BOTH sides (all tool defaults), for BOTH the NMR
 // and twoloop coders, the Go stream size must land within 3% of the C
@@ -111,58 +193,14 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 					dir := t.TempDir()
 					rawPath := filepath.Join(dir, "src.f32")
 					writeRawF32(t, rawPath, sig.src)
-					cStream := cEncodeTools(t, ffmpeg, rawPath, 44100, 2, br,
-						coder.name, filepath.Join(dir, "c.adts"))
+					cPath := filepath.Join(dir, "c.adts")
+					cEncodeTools(t, ffmpeg, rawPath, 44100, 2, br,
+						coder.name, cPath)
 					goStream := encodeADTSPlanar(t,
 						enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2,
 							Coder: coder.kind}, sig.src)
 
-					sizeDelta := 100 * (float64(len(goStream)) - float64(len(cStream))) /
-						float64(len(cStream))
-					if math.Abs(sizeDelta) > 3.0 {
-						t.Errorf("stream size %+.2f%% vs C, gate demands within 3%%", sizeDelta)
-					}
-
-					goPath := filepath.Join(dir, "go.adts")
-					if err := os.WriteFile(goPath, goStream, 0o644); err != nil {
-						t.Fatal(err)
-					}
-					const delay = 1024
-					worstDelta := math.Inf(1)
-					meanDelta := 0.0
-					decG := ffmpegDecode(t, ffmpeg, goPath)
-					decC := ffmpegDecode(t, ffmpeg, filepath.Join(dir, "c.adts"))
-					for c := range 2 {
-						dg := make([]float32, len(decG)/2)
-						dc := make([]float32, len(decC)/2)
-						for i := range dg {
-							dg[i] = decG[i*2+c]
-						}
-						for i := range dc {
-							dc[i] = decC[i*2+c]
-						}
-						pg := psnr(sig.src[c], dg, delay)
-						pc := psnr(sig.src[c], dc, delay)
-						t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
-							c, pg, pc, pg-pc, sizeDelta)
-						worstDelta = math.Min(worstDelta, pg-pc)
-						meanDelta += (pg - pc) / 2
-					}
-					// M/S and I/S trade quantization error between the two
-					// channels, so per-channel PSNR is not stable under a
-					// stereo-tool decision flip; the gate is the per-case
-					// MEAN delta, with a worst-channel backstop. One rule
-					// for all twelve cases; see gateCastanetSecs for why the
-					// reference is reproducible enough to assert against.
-					const meanBound, worstBound = -0.5, -1.0
-					if meanDelta < meanBound {
-						t.Errorf("mean PSNR %.2f dB below the C encoder's, gate allows %.1f dB",
-							meanDelta, meanBound)
-					}
-					if worstDelta < worstBound {
-						t.Errorf("worst-channel PSNR %.2f dB below the C encoder's, backstop is %.1f dB",
-							worstDelta, worstBound)
-					}
+					checkGateVsC(t, ffmpeg, dir, sig.src, goStream, cPath)
 				})
 			}
 		}
@@ -277,6 +315,86 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 			if sd > tc.target+tc.fuzz {
 				t.Errorf("stddev %.2f above target %.0f + fuzz %.0f", sd, tc.target, tc.fuzz)
 			}
+		})
+	}
+}
+
+// TestPhase4NMRStereoSwitchesVsC is the differential gate for issue #92: with
+// the default NMR coder, DisableMS and DisableIS must reach the
+// pre-quantization stereo decision the way they reach the C's, not merely
+// change the output.
+//
+// Nothing else scores go-aac against the C with a stereo tool switch SET under
+// the default coder. TestPhase4ToolsGateVsC runs both sides at their tool
+// defaults, and TestPhase4FATEAnalogues sweeps the switches on CoderFast and
+// scores against the SOURCE rather than against the C, so it cannot tell a
+// faithful port from a plausible one. The arm the issue was about had no
+// oracle cell at all, which is how it stayed wrong: nmrDecideStereo was built
+// with the two options hardcoded to their defaults, so the switches were
+// ignored under the coder that is both the zero value and the recommendation.
+//
+// The C reads them at three sites inside nmr_decide_stereo (aacenc.c:731,
+// 769-770 and 787) and a fourth guarding the call (aacenc.c:1216-1217). That
+// fourth site is where the C decides whether to skip nmr_decide_stereo
+// entirely, and with it the PNS-stereo reservation that keeps a stereo PNS band
+// only where it is clearly decorrelated and clears CanPNS on the rest (the
+// noise-like-in-both intersection having already run before the call). A port
+// that ran the function anyway would agree on the stereo decision, which is
+// empty either way, and diverge on which bands survive as PNS. This oracle cell
+// does NOT pin that fourth site, though: the neither case PASSES under a
+// deleted-term mutation of the go-aac guard at -0.06% size, well inside the 3%
+// bound. TestNMRStereoGuardWiring (tool_wiring_test.go) is what pins that
+// case. The other mutation of the same guard, `||` to `&&`, DOES fail here,
+// on the nois cell, at +65% stream size.
+//
+// The cells do not carry equal weight, and it is worth saying which. Measured
+// against the unfixed encoder, noms and neither both miss the C's stream size
+// by about 39.5%, so they are what gates the fix. nois misses by only 0.16%
+// and PASSES unfixed, because I/S reaches just 333 of the roughly thirty
+// thousand coded pair-bands on this corpus at this rate (about 1%): too small
+// an effect for a 3% size bound to see. It is kept as corroboration that Go
+// and C agree with the tool off, not as the gate. TestEncoderToolWiring (tool_wiring_test.go) is the
+// gate for DisableIS, because a counter that must reach exactly zero does not
+// care how many bands the tool would have claimed.
+//
+// One bitrate, because what is under test is which options reach which
+// decision rather than how the decision varies with rate; TestPhase4ToolsGateVsC
+// carries the rate sweep at the tool defaults.
+func TestPhase4NMRStereoSwitchesVsC(t *testing.T) {
+	ffmpeg := ffmpegBin(t)
+	// castanetsChannels is the single generator for this corpus (see its doc
+	// in arch_determinism_test.go); use it rather than open-coding the seeds so
+	// this gate cannot drift from the corpus every sibling gate scores against.
+	src := castanetsChannels(archChanStereo, 44100, 44100*gateCastanetSecs)
+	const bitrate = 128000
+
+	for _, tc := range []struct {
+		name string
+		cfg  enc.Config // the switches under test
+		// cArgs are the ffmpeg options that mirror cfg. aac_ms is a
+		// tri-state defaulting to -1 (auto) and aac_is a boolean defaulting
+		// to 1, so 0 turns each off (aacenc.c:1655-1656).
+		cArgs []string
+	}{
+		{"noms", enc.Config{DisableMS: true}, []string{"-aac_ms", "0"}},
+		{"nois", enc.Config{DisableIS: true}, []string{"-aac_is", "0"}},
+		{"neither", enc.Config{DisableMS: true, DisableIS: true},
+			[]string{"-aac_ms", "0", "-aac_is", "0"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rawPath := filepath.Join(dir, "src.f32")
+			writeRawF32(t, rawPath, src)
+			args := append([]string{"-aac_coder", coderNMR}, tc.cArgs...)
+			cPath := filepath.Join(dir, "c.adts")
+			cEncodeArgs(t, ffmpeg, rawPath, 44100, 2, bitrate, cPath, args...)
+
+			cfg := tc.cfg
+			cfg.SampleRate, cfg.Bitrate, cfg.Channels = 44100, bitrate, 2
+			cfg.Coder = enc.CoderNMR
+			goStream := encodeADTSPlanar(t, cfg, src)
+
+			checkGateVsC(t, ffmpeg, dir, src, goStream, cPath)
 		})
 	}
 }
