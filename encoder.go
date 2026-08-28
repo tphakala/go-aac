@@ -147,21 +147,23 @@ type EncoderConfig struct {
 
 	// Tool switches are negative (Disable*) so the zero value enables
 	// every tool, matching FFmpeg's defaults: TNS, PNS, M/S and I/S on.
+	// All four reach every coder.
 	//
-	// DisableTNS and DisablePNS apply to every coder. The two stereo
-	// switches do NOT: CoderNMR makes its stereo decision before
-	// quantization, from the psychoacoustic model alone, and that decision
-	// is not gated on either switch. Under CoderNMR, DisableMS is a strict
-	// no-op that cannot change a byte, and DisableIS never disables the
-	// tool; on its own it changes only internal bookkeeping, though set
-	// together with DisablePNS it still narrows the coding bandwidth as
-	// described above. Since CoderNMR is the zero value and the recommended
-	// coder, a caller who needs either tool genuinely off has to select
-	// another coder. The encoder's own test suite pins both no-ops.
+	// Where a coder reads them differs. CoderTwoLoop and CoderFast decide
+	// mid/side and intensity after quantization, so DisableMS and DisableIS
+	// skip those searches. CoderNMR decides both before quantization from
+	// the psychoacoustic model alone, so there the switches feed that
+	// decision instead; with both set it is skipped entirely, as upstream
+	// does. The observable contract is the same either way: the tool does
+	// not appear in the output.
+	//
+	// Note DisableIS has a second effect on every coder, independent of the
+	// stereo decision: set together with DisablePNS it narrows the coding
+	// bandwidth, as described on Coder. So it is not inert on a mono stream.
 	DisableTNS bool // disable temporal noise shaping
 	DisablePNS bool // disable perceptual noise substitution
-	DisableMS  bool // disable the mid/side stereo search (non-NMR coders)
-	DisableIS  bool // disable intensity stereo (non-NMR coders)
+	DisableMS  bool // disable the mid/side stereo search
+	DisableIS  bool // disable intensity stereo
 }
 
 // validate reports the first config problem, or nil.

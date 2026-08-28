@@ -318,23 +318,27 @@ func TestEncoderEdgeConfigReset(t *testing.T) {
 }
 
 // TestEncoderMidSideWiring gates the mid/side contract that the encoder
-// documents but nothing exercised. The M/S search (internal/enc/encoder.go,
-// mirroring aacenc.c:1249-1255) is guarded by
-// `!cfg.DisableMS && cfg.Coder != CoderNMR`, and that guard is the ONLY
-// consumer of DisableMS in the tree; NMR instead decides mid/side inside
-// nmrDecideStereo before quantization (aacenc.c:1214-1220). So DisableMS must
-// change the bitstream for twoloop and fast, proving the switch reaches the
-// search, and must be a strict no-op for NMR, proving the coder's own decision
-// is not being second-guessed. Both variants must still decode.
+// documents but nothing exercised. DisableMS reaches every coder, through two
+// different mechanisms: twoloop and fast decide mid/side after quantization, so
+// the switch skips SearchForMS and applyMidSideStereo (internal/enc/encoder.go,
+// mirroring aacenc.c:1249-1255), while NMR decides it inside nmrDecideStereo
+// before quantization, so the switch is threaded in as midSide == 0
+// (aacenc.c:1214-1220 and the options term at aacenc.c:1216-1217). Either way
+// the bitstream must change, and both variants must still decode.
 //
-// Only mid/side is gated here, hence the name. The intensity-stereo switch does
-// not admit the same byte-equality assertion for NMR: nmrDecideStereo is called
-// with intensityStereo hardcoded true, so I/S still runs under NMR and what
-// DisableIS skips is the `cpe.IsMode` bookkeeping, which feeds the coeffs
-// restore in the rate-control loop. TestEncoderToolWiring (tool_wiring_test.go)
-// is the companion gate for DisableTNS, DisablePNS and DisableIS; it asserts
-// against the public Stats counters precisely because byte equality is the
-// wrong instrument for those three.
+// The NMR arm asserted the opposite until issue #92: nmrDecideStereo was built
+// with midSide hardcoded to -1, so DisableMS was a strict no-op there and this
+// test pinned that. If the NMR case starts comparing equal again, the wiring
+// has regressed rather than the expectation being wrong.
+//
+// Only mid/side is gated here, hence the name. TestEncoderToolWiring
+// (tool_wiring_test.go) is the companion gate for DisableTNS, DisablePNS and
+// DisableIS; it asserts against the public Stats counters, which name WHICH
+// tool fired where byte inequality only says that something did. Byte equality
+// is the right instrument for this one because the correlated input below makes
+// mid/side unambiguous, and because MSBands cannot serve: SearchForIS also
+// writes MsMask, using it to signal intensity phase (internal/coder/
+// stereo_tools.go), so the counter is not attributable to this switch alone.
 func TestEncoderMidSideWiring(t *testing.T) {
 	const rate = 44100
 	// Both channels carry the SAME signal. That is deliberate: it drives the
@@ -348,15 +352,9 @@ func TestEncoderMidSideWiring(t *testing.T) {
 	src := [][]float32{mono, mono}
 
 	for _, tc := range testCoders {
-		// The NMR coder makes its stereo decision pre-quantization in
-		// nmrDecideStereo, which is not gated on DisableMS, so the flag is a
-		// strict no-op there and must leave the bytes untouched. Deriving that
-		// from the coder rather than restating it per row keeps this sweep on
-		// the one shared coder axis. A coder added to testCoders inherits
-		// "DisableMS must change the bytes", which is the right default (it is
-		// what every non-NMR coder does) but is an assumption: if it also
-		// decides stereo pre-quantizer, add it to the no-op side here.
-		wantEqual := tc.coder == CoderNMR
+		// Every coder must change the bytes: there is no longer a coder for
+		// which DisableMS is a no-op, so a coder added to testCoders inherits
+		// the same expectation with nothing to opt out of.
 		for _, br := range []int{edgeBitrateLow, edgeBitrateMid} {
 			t.Run(fmt.Sprintf("%s_%d", tc.name, br), func(t *testing.T) {
 				base := EncoderConfig{SampleRate: rate, Channels: 2, Bitrate: br, Coder: tc.coder}
@@ -383,13 +381,10 @@ func TestEncoderMidSideWiring(t *testing.T) {
 						break
 					}
 				}
-				switch {
-				case wantEqual && !equal:
-					t.Errorf("DisableMS changed the %s bitstream; the M/S search is skipped for this coder, "+
-						"so the flag must not reach it", tc.name)
-				case !wantEqual && equal:
-					t.Errorf("DisableMS left the %s bitstream unchanged; the M/S search should have run "+
-						"with it clear, so the flag is not wired through", tc.name)
+				if equal {
+					t.Errorf("DisableMS left the %s bitstream unchanged; mid/side should have been "+
+						"chosen with the switch clear on this fully correlated input, so the flag "+
+						"is not reaching the decision (issue #92)", tc.name)
 				}
 
 				// Both variants must remain decodable, not merely different.

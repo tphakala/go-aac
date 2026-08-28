@@ -110,11 +110,6 @@ type toolGate struct {
 	// Set it whenever a cell was added for a structural reason; leave it clear
 	// when the cells are the same branch sampled twice.
 	cellsAreDistinctBranches bool
-	// reaches reports whether the switch actually reaches the search for a
-	// coder. Where it is false the switch is a documented near-no-op and the
-	// gate asserts THAT instead, because asserting the counter goes to zero
-	// would be asserting the opposite of the contract.
-	reaches func(Coder) bool
 	// wiring cites where in the encoder the switch is read, so a failure points
 	// at the code to look at rather than only at the counter that moved.
 	wiring string
@@ -126,7 +121,6 @@ var toolGates = []toolGate{
 		disable: func(c *EncoderConfig) { c.DisableTNS = true },
 		used:    func(s Stats) int64 { return s.TNSLongFrames + s.TNSShortFrames },
 		cells:   tnsCells,
-		reaches: func(Coder) bool { return true },
 		wiring: "internal/enc/encoder.go reads it once into useTNS and gates SearchForTNS " +
 			"on both arms: pre-quantizer for NMR (tnsFirst) and post-quantizer for twoloop and fast",
 	},
@@ -139,7 +133,6 @@ var toolGates = []toolGate{
 		// paths, so each must fire on its own; pooling them would let either
 		// go dead unnoticed.
 		cellsAreDistinctBranches: true,
-		reaches:                  func(Coder) bool { return true },
 		wiring: "internal/enc/encoder.go gates MarkPNS on the two NMR arms (mono and stereo), " +
 			"which is load-bearing there because CanPNS drives the NMR trellis, and SearchForPNS " +
 			"on the non-NMR arm, which is load-bearing there because SearchForPNS sets NoiseBT " +
@@ -150,17 +143,15 @@ var toolGates = []toolGate{
 		disable: func(c *EncoderConfig) { c.DisableIS = true },
 		used:    func(s Stats) int64 { return s.ISBands },
 		cells:   isCells,
-		// NOT wired to the search under NMR. internal/enc/encoder.go builds the
-		// stereoInput for nmrDecideStereo with intensityStereo: true as a
-		// literal, so the NMR pre-quantizer I/S search runs whatever the caller
-		// asked for. All DisableIS skips on that arm is the
-		// `if cpe.IsMode { e.isMode = 1 }` bookkeeping, which feeds the
-		// coeffs-restore in the rate-control loop; since that restore is also
-		// reached through msMode and tnsMode, whether the bytes change at all
-		// is content dependent. See the no-op branch below.
-		reaches: func(c Coder) bool { return c != CoderNMR },
+		// Reaches every coder, but through two different mechanisms, which is
+		// why this gate reads a counter rather than bytes. On the non-NMR arm
+		// the switch skips the post-quantizer search; on the NMR arm it is
+		// threaded into nmrDecideStereo, which decides I/S from the psy model
+		// before quantization. Until issue #92 the NMR arm was built with
+		// intensityStereo hardcoded true and the switch did nothing there.
 		wiring: "internal/enc/encoder.go gates SearchForIS and applyIntensityStereo on the " +
-			"non-NMR arm only; the NMR arm decides I/S pre-quantizer in nmrDecideStereo",
+			"non-NMR arm, and feeds intensityStereo into nmrDecideStereo on the NMR arm, " +
+			"which decides I/S pre-quantizer",
 	},
 }
 
@@ -224,23 +215,6 @@ func checkToolWiringCell(t *testing.T, gate *toolGate, coder Coder, cell toolWir
 		t.Errorf("%s never fired on this cell even with the switch clear, so this cell's "+
 			"assertions are vacuous. It is not interchangeable with the other cells: it is "+
 			"here to cover a separate code path (%s)", gate.name, gate.wiring)
-	}
-
-	if !gate.reaches(coder) {
-		// Documented no-op: the switch never reaches this coder's search, so
-		// the tool must still fire with the switch SET. Asserting the counters
-		// are EQUAL would over-pin, because the switch does change e.isMode,
-		// which can perturb the rate-control loop and so, indirectly, which
-		// bands end up masked. Nonzero both ways is the contract; going to zero
-		// means someone wired the switch into the search and needs to say so
-		// deliberately.
-		if onUsed > 0 && offUsed == 0 {
-			t.Errorf("%s fired on %d bands with the switch clear but 0 with it set, so the "+
-				"switch now reaches the search for this coder; that is a behaviour change "+
-				"for the DEFAULT coder and must be deliberate (%s)",
-				gate.name, onUsed, gate.wiring)
-		}
-		return onUsed
 	}
 
 	if offUsed != 0 {
