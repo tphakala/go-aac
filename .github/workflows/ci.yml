@@ -56,13 +56,18 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # -timeout 20m overrides Go's 10-minute per-binary default. The root
+      # package's race binary is the long pole and the edge-config soak added to
+      # it, so the margin against a slow or loaded runner is smaller than it was.
+      # Blowing the default surfaces as a panic stack dump that reads like a
+      # hang rather than like a slow runner, which is the issue #62 failure mode.
       - name: Run tests
         if: matrix.os != 'ubuntu-latest'
-        run: go test -race ./...
+        run: go test -race -timeout 20m ./...
 
       - name: Run tests with coverage
         if: matrix.os == 'ubuntu-latest'
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
@@ -77,7 +82,7 @@ jobs:
       # assembly; its scalar kernels are byte-identical but must be tested on
       # every arch this matrix covers or they can rot unnoticed.
       - name: Run tests (noasm)
-        run: go test -race -tags noasm ./...
+        run: go test -race -timeout 20m -tags noasm ./...
 
   lint:
     name: Lint
