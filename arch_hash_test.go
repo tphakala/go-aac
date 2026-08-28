@@ -60,7 +60,8 @@ func TestArchHashCorpus(t *testing.T) {
 		t.Skip("set GOAAC_ARCHHASH to run the arch-hash reproduction")
 	}
 
-	lines := make([]string, 0, 32)
+	// 4 input rows + 9 tonal diagnostic rows + one row per gated case.
+	lines := make([]string, 0, 13+len(archCases()))
 
 	// Input-PCM arch-stability lines: hash the raw float32 bytes of each
 	// distinct castanets input the gate uses. These must match across arches.
