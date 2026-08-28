@@ -147,10 +147,21 @@ type EncoderConfig struct {
 
 	// Tool switches are negative (Disable*) so the zero value enables
 	// every tool, matching FFmpeg's defaults: TNS, PNS, M/S and I/S on.
+	//
+	// DisableTNS and DisablePNS apply to every coder. The two stereo
+	// switches do NOT: CoderNMR makes its stereo decision before
+	// quantization, from the psychoacoustic model alone, and that decision
+	// is not gated on either switch. Under CoderNMR, DisableMS is a strict
+	// no-op that cannot change a byte, and DisableIS never disables the
+	// tool; on its own it changes only internal bookkeeping, though set
+	// together with DisablePNS it still narrows the coding bandwidth as
+	// described above. Since CoderNMR is the zero value and the recommended
+	// coder, a caller who needs either tool genuinely off has to select
+	// another coder. The encoder's own test suite pins both no-ops.
 	DisableTNS bool // disable temporal noise shaping
 	DisablePNS bool // disable perceptual noise substitution
-	DisableMS  bool // disable the mid/side stereo search
-	DisableIS  bool // disable intensity stereo
+	DisableMS  bool // disable the mid/side stereo search (non-NMR coders)
+	DisableIS  bool // disable intensity stereo (non-NMR coders)
 }
 
 // validate reports the first config problem, or nil.

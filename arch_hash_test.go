@@ -81,10 +81,10 @@ func TestArchHashCorpus(t *testing.T) {
 
 	// Tonal diagnostic rows (stereo/44100 only), never gated.
 	tonal := synthStereoNMR(44100*8, 44100)
-	for _, c := range archCoders {
+	for _, c := range testCoders {
 		for _, br := range []int{96000, 128000, 192000} {
 			stream := encodeADTSPlanar(t,
-				enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2, Coder: c.kind},
+				enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2, Coder: archCoderKind(c.coder)},
 				tonal)
 			sum := sha256.Sum256(stream)
 			lines = append(lines, fmt.Sprintf("adts     %-8s %-9s %-6s %5d %6d  %s",

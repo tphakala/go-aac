@@ -35,26 +35,45 @@ tasks:
     cmds:
       - go test -race -tags noasm ./...
 
+  test:norace:
+    desc: Run the suite without the race detector
+    cmds:
+      # Not redundant with test:race. Several tests deliberately shrink or skip
+      # under the detector, so they only ever execute here: the edge-config soak
+      # drops its in-range bitrates, TestEncoderToolWiring skips outright, and
+      # pcm's TestEncodeInterleavedReuseAllocs drops its zero-allocation bound.
+      # CI gained this lane for the same reason; without it locally, a green
+      # `task check` says nothing about any of them.
+      - go test -count=1 ./...
+
   bench:
     desc: Run all benchmarks
     cmds:
       - go test -bench=. -benchmem -benchtime={{.BENCH_TIME}} ./...
 
   vet:
-    desc: Run go vet for amd64 and arm64, both tag settings
+    desc: Run go vet for amd64 and arm64, all three tag settings
     cmds:
       - GOARCH=amd64 go vet ./...
       - GOARCH=arm64 go vet ./...
       - GOARCH=amd64 go vet -tags noasm ./...
       - GOARCH=arm64 go vet -tags noasm ./...
+      # The race-tagged files (edge_soak_race_test.go, pcm/raceflag_race_test.go)
+      # are compiled by neither pass above. The race test lanes do compile them,
+      # but with the compiler, not with vet, so without this they are never
+      # vetted at all.
+      - GOARCH=amd64 go vet -tags race ./...
+      - GOARCH=arm64 go vet -tags race ./...
 
   lint:
-    desc: Run golangci-lint for both tag settings
+    desc: Run golangci-lint for all three tag settings
     cmds:
       - golangci-lint run ./...
       # The noasm files are invisible to the default run, so a violation in
       # them only shows up here and in CI's lint matrix.
       - golangci-lint run --build-tags noasm ./...
+      # Same for the race-tagged files, which no other lane lints.
+      - golangci-lint run --build-tags race ./...
 
   tidy:
     desc: Tidy and verify go.mod
@@ -68,12 +87,13 @@ tasks:
       - git config core.hooksPath .githooks
 
   check:
-    desc: Full local gate (build, vet, lint, race tests, noasm race tests)
+    desc: Full local gate (build, vet, lint, race tests, noasm race tests, non-race tests)
     cmds:
       - task: build
       - task: vet
       - task: lint
       - task: test:race
-      # CI vets, lints and tests both tag settings, so the local gate does too;
-      # a noasm-only failure is otherwise invisible until push.
+      # CI vets, lints and tests every tag setting, so the local gate does too;
+      # a noasm-only or race-only failure is otherwise invisible until push.
       - task: test:noasm
+      - task: test:norace

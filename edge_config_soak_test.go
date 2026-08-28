@@ -112,17 +112,6 @@ func chLabelFor(channels int) string {
 	return archChanStereo
 }
 
-// edgeCoders is the coder axis, carrying the label explicitly because Coder is
-// a bare int with no String method.
-var edgeCoders = []struct {
-	name  string
-	coder Coder
-}{
-	{coderNMR, CoderNMR},
-	{coderTwoLoop, CoderTwoLoop},
-	{coderFast, CoderFast},
-}
-
 // edgeCase is one cell of the edge-config matrix.
 type edgeCase struct {
 	coderName string
@@ -145,8 +134,8 @@ func (c edgeCase) name() string {
 // axes rather than per-axis divergence.
 func edgeCases() []edgeCase {
 	bitrates := edgeSoakBitrates()
-	cases := make([]edgeCase, 0, len(edgeCoders)*2*2*len(bitrates))
-	for _, c := range edgeCoders {
+	cases := make([]edgeCase, 0, len(testCoders)*2*2*len(bitrates))
+	for _, c := range testCoders {
 		for _, rate := range []int{44100, 48000} {
 			for _, ch := range []struct {
 				label string
@@ -299,7 +288,7 @@ func TestEncoderEdgeConfigSoak(t *testing.T) {
 // cross-frame state of the two layouts.
 func TestEncoderEdgeConfigReset(t *testing.T) {
 	inputs := edgeInputCache{}
-	for _, c := range edgeCoders {
+	for _, c := range testCoders {
 		for _, rate := range []int{44100, 48000} {
 			for _, br := range []int{edgeBitrateFloor, edgeBitrateClamped} {
 				cfg := EncoderConfig{SampleRate: rate, Channels: 2, Bitrate: br, Coder: c.coder}
@@ -342,8 +331,10 @@ func TestEncoderEdgeConfigReset(t *testing.T) {
 // not admit the same byte-equality assertion for NMR: nmrDecideStereo is called
 // with intensityStereo hardcoded true, so I/S still runs under NMR and what
 // DisableIS skips is the `cpe.IsMode` bookkeeping, which feeds the coeffs
-// restore in the rate-control loop. TNS and PNS have no oracle-free wiring gate
-// at all; both are tracked as follow-up rather than bolted on here.
+// restore in the rate-control loop. TestEncoderToolWiring (tool_wiring_test.go)
+// is the companion gate for DisableTNS, DisablePNS and DisableIS; it asserts
+// against the public Stats counters precisely because byte equality is the
+// wrong instrument for those three.
 func TestEncoderMidSideWiring(t *testing.T) {
 	const rate = 44100
 	// Both channels carry the SAME signal. That is deliberate: it drives the
@@ -356,15 +347,16 @@ func TestEncoderMidSideWiring(t *testing.T) {
 	mono := edgeSoakInput(archChanMono, rate, edgeSoakSeconds)[0]
 	src := [][]float32{mono, mono}
 
-	for _, tc := range []struct {
-		name      string
-		coder     Coder
-		wantEqual bool
-	}{
-		{coderNMR, CoderNMR, true},
-		{coderTwoLoop, CoderTwoLoop, false},
-		{coderFast, CoderFast, false},
-	} {
+	for _, tc := range testCoders {
+		// The NMR coder makes its stereo decision pre-quantization in
+		// nmrDecideStereo, which is not gated on DisableMS, so the flag is a
+		// strict no-op there and must leave the bytes untouched. Deriving that
+		// from the coder rather than restating it per row keeps this sweep on
+		// the one shared coder axis. A coder added to testCoders inherits
+		// "DisableMS must change the bytes", which is the right default (it is
+		// what every non-NMR coder does) but is an assumption: if it also
+		// decides stereo pre-quantizer, add it to the no-op side here.
+		wantEqual := tc.coder == CoderNMR
 		for _, br := range []int{edgeBitrateLow, edgeBitrateMid} {
 			t.Run(fmt.Sprintf("%s_%d", tc.name, br), func(t *testing.T) {
 				base := EncoderConfig{SampleRate: rate, Channels: 2, Bitrate: br, Coder: tc.coder}
@@ -392,10 +384,10 @@ func TestEncoderMidSideWiring(t *testing.T) {
 					}
 				}
 				switch {
-				case tc.wantEqual && !equal:
+				case wantEqual && !equal:
 					t.Errorf("DisableMS changed the %s bitstream; the M/S search is skipped for this coder, "+
 						"so the flag must not reach it", tc.name)
-				case !tc.wantEqual && equal:
+				case !wantEqual && equal:
 					t.Errorf("DisableMS left the %s bitstream unchanged; the M/S search should have run "+
 						"with it clear, so the flag is not wired through", tc.name)
 				}
@@ -467,32 +459,10 @@ func encodeCollectReset(t *testing.T, cfg EncoderConfig, sig [][]float32) [][]by
 		t.Fatal(err)
 	}
 
-	n := len(sig[0])
-	// Same precondition encodeCollect enforces. Without it the reslice below
-	// panics on a bounds error instead of failing with a diagnostic.
-	if n%FrameSize != 0 {
-		t.Fatalf("signal length %d is not a whole number of frames", n)
-	}
-	aus := make([][]byte, 0, n/FrameSize+1)
-	collect := func(au []byte, encErr error) {
-		if encErr != nil {
-			t.Fatal(encErr)
-		}
-		if len(au) > 0 {
-			aus = append(aus, au)
-		}
-	}
-	frame = make([][]float32, len(sig))
-	for off := 0; off < n; off += FrameSize {
-		for ch := range sig {
-			frame[ch] = sig[ch][off : off+FrameSize]
-		}
-		collect(e.EncodeFrame(nil, frame))
-	}
-	for !e.Drained() {
-		collect(e.EncodeFrame(nil, nil))
-	}
-	return aus
+	// The frame-feed, drain and whole-frame precondition are shared with
+	// encodeCollect (encoder_delay_test.go); only the encoder lifecycle above
+	// is what this helper adds.
+	return encodeDrain(t, e, sig)
 }
 
 // isDigitalSilence reports whether b is a non-empty run of zero bytes, i.e.

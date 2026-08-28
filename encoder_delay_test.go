@@ -28,21 +28,26 @@ func delayTestSignal(n, channels int) [][]float32 {
 	return sig
 }
 
-// encodeCollect encodes the whole per-channel signal in FrameSize frames, then
-// drains, returning every emitted raw access unit and the stream's ASC. Each
-// EncodeFrame call is passed a nil dst, so every returned slice is an
-// independent access unit safe to retain.
-func encodeCollect(t *testing.T, cfg EncoderConfig, sig [][]float32) (aus [][]byte, asc []byte) {
+// encodeDrain feeds the whole per-channel signal through e in FrameSize frames
+// and then drains, returning every emitted raw access unit. Each EncodeFrame
+// call is passed a nil dst, so every returned slice is an independent access
+// unit safe to retain.
+//
+// It takes an already-constructed encoder rather than a config so that callers
+// needing a particular encoder lifecycle (a fresh one, or one dirtied and then
+// Reset onto the config under test) can arrange that themselves and still share
+// one definition of the access-unit collection and drain contract. That
+// contract lives here alone: if the encoder API moves, this is the only feed
+// loop to update.
+func encodeDrain(t *testing.T, e *Encoder, sig [][]float32) [][]byte {
 	t.Helper()
-	e, err := NewEncoder(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
 	n := len(sig[0])
+	// Whole frames only. Without this the reslice below panics on a bounds
+	// error instead of failing with a diagnostic.
 	if n%FrameSize != 0 {
 		t.Fatalf("signal length %d is not a whole number of frames", n)
 	}
-	aus = make([][]byte, 0, n/FrameSize+1)
+	aus := make([][]byte, 0, n/FrameSize+1)
 	collect := func(au []byte, encErr error) {
 		if encErr != nil {
 			t.Fatal(encErr)
@@ -61,7 +66,28 @@ func encodeCollect(t *testing.T, cfg EncoderConfig, sig [][]float32) (aus [][]by
 	for !e.Drained() {
 		collect(e.EncodeFrame(nil, nil))
 	}
-	return aus, e.AudioSpecificConfig()
+	return aus
+}
+
+// encodeCollectStats encodes the whole per-channel signal through a fresh
+// encoder for cfg, returning every emitted raw access unit, the stream's ASC
+// and the tool-usage counters accumulated over the run.
+func encodeCollectStats(t *testing.T, cfg EncoderConfig, sig [][]float32) (aus [][]byte, asc []byte, st Stats) {
+	t.Helper()
+	e, err := NewEncoder(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aus = encodeDrain(t, e, sig)
+	return aus, e.AudioSpecificConfig(), e.Stats()
+}
+
+// encodeCollect is encodeCollectStats for the callers that do not look at the
+// counters. It exists so those call sites stay readable, not to add behaviour.
+func encodeCollect(t *testing.T, cfg EncoderConfig, sig [][]float32) (aus [][]byte, asc []byte) {
+	t.Helper()
+	aus, asc, _ = encodeCollectStats(t, cfg, sig)
+	return aus, asc
 }
 
 // decodeAll decodes every access unit through the raw decoder and returns the
