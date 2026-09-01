@@ -3,12 +3,8 @@
 package aac
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
@@ -37,100 +33,25 @@ func synthStereoNMR(n, rate int) [][]float32 {
 	return [][]float32{l, r}
 }
 
-// cEncodeNMR runs the pinned C encoder with the NMR coder at the Phase 3
-// feature set (TNS off; PNS/IS/MS on, as the Go pipeline has them).
-func cEncodeNMR(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
-	outPath string) []byte {
-	t.Helper()
-	cmd := exec.Command(ffmpeg, "-v", "error", "-y", "-f", "f32le",
-		"-ar", fmt.Sprint(rate), "-ac", fmt.Sprint(ch), "-i", rawPath,
-		"-c:a", "aac", "-aac_coder", "nmr", "-aac_tns", "0",
-		"-b:a", fmt.Sprint(bitrate), "-flags", "+bitexact",
-		"-f", "adts", outPath)
-	if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
-		t.Fatalf("C encode: %v %q", err, out)
-	}
-	stream, err := os.ReadFile(outPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return stream
-}
-
-func writeRawF32(t *testing.T, path string, src [][]float32) {
-	t.Helper()
-	ch := len(src)
-	raw := make([]byte, 4*ch*len(src[0]))
-	for i := range src[0] {
-		for c := range ch {
-			binary.LittleEndian.PutUint32(raw[4*(i*ch+c):], math.Float32bits(src[c][i]))
-		}
-	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestPhase3NMRGateVsC is the Phase 3 gate (issue #5): with the NMR coder
-// on BOTH sides at 96/128/192 kbps stereo, the Go stream size must land
-// within 3% of the C encoder's, the decoded PSNR within 0.5 dB of the C
-// encoder's own PSNR per case, and the Go streams must decode cleanly
-// under the pinned ffmpeg.
+// on BOTH sides at 96/128/192 kbps stereo, TNS off on both (the Phase 3
+// feature set; PNS, I/S and M/S on), the Go stream size must land within 3%
+// of the C encoder's, the decoded PSNR within 0.5 dB of the C encoder's own
+// PSNR per case, and the Go streams must decode cleanly under the pinned
+// ffmpeg. It scores through the shared gate under phase3Bounds, which keep
+// this gate's worst-channel rule rather than Phase 4's mean rule.
 func TestPhase3NMRGateVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	tonal := synthStereoNMR(44100*8, 44100)
-	casta := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*6, 44100, 0x5eed1234, 137)
-	for _, sig := range []struct {
-		name string
-		src  [][]float32
-	}{
-		{"stereo tonal", tonal},
-		{sigStereoCastanets, [][]float32{casta, castaR}},
-	} {
+	sigs := []gateSignal{
+		newGateSignal(t, "stereo tonal", synthStereoNMR(44100*8, 44100)),
+		newGateSignal(t, sigStereoCastanets, castanetsChannels(archChanStereo, 44100, 44100*6)),
+	}
+	for _, sig := range sigs {
 		for _, br := range []int{96000, 128000, 192000} {
 			t.Run(fmt.Sprintf("%s %dk", sig.name, br/1000), func(t *testing.T) {
-				dir := t.TempDir()
-				rawPath := filepath.Join(dir, "src.f32")
-				writeRawF32(t, rawPath, sig.src)
-				cStream := cEncodeNMR(t, ffmpeg, rawPath, 44100, 2, br,
-					filepath.Join(dir, "c.adts"))
-				goStream := encodeADTSPlanar(t,
-					enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2, DisableTNS: true}, sig.src)
-
-				sizeDelta := 100 * (float64(len(goStream)) - float64(len(cStream))) /
-					float64(len(cStream))
-				if math.Abs(sizeDelta) > 3.0 {
-					t.Errorf("stream size %+.2f%% vs C, gate demands within 3%%", sizeDelta)
-				}
-
-				goPath := filepath.Join(dir, "go.adts")
-				if err := os.WriteFile(goPath, goStream, 0o644); err != nil {
-					t.Fatal(err)
-				}
-				const delay = 1024
-				worstDelta := math.Inf(1)
-				decG := ffmpegDecode(t, ffmpeg, goPath)
-				decC := ffmpegDecode(t, ffmpeg, filepath.Join(dir, "c.adts"))
-				for c := range 2 {
-					dg := make([]float32, len(decG)/2)
-					dc := make([]float32, len(decC)/2)
-					for i := range dg {
-						dg[i] = decG[i*2+c]
-					}
-					for i := range dc {
-						dc[i] = decC[i*2+c]
-					}
-					pg := psnr(sig.src[c], dg, delay)
-					pc := psnr(sig.src[c], dc, delay)
-					t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
-						c, pg, pc, pg-pc, sizeDelta)
-					worstDelta = math.Min(worstDelta, pg-pc)
-				}
-				if worstDelta < -0.5 {
-					t.Errorf("PSNR %.2f dB below the C encoder's, gate allows -0.5 dB",
-						worstDelta)
-				}
+				gateCellVsC(t, ffmpeg, sig,
+					enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2, DisableTNS: true},
+					phase3Bounds)
 			})
 		}
 	}

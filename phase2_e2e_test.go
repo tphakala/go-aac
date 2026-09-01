@@ -3,10 +3,8 @@
 package aac
 
 import (
-	"encoding/binary"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -192,35 +190,23 @@ func TestWindowSequenceVsC(t *testing.T) {
 		{"tonal", synthTonal(44100*5, 44100)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			rawPath := filepath.Join(dir, "src.f32")
-			raw := make([]byte, 4*len(tc.src))
-			for i, v := range tc.src {
-				binary.LittleEndian.PutUint32(raw[4*i:], math.Float32bits(v))
-			}
-			if err := os.WriteFile(rawPath, raw, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			cPath := filepath.Join(dir, "c.adts")
-			cmd := exec.Command(ffmpeg, "-v", "error", "-f", "f32le", "-ar", "44100",
-				"-ac", "1", "-i", rawPath, "-c:a", "aac", "-aac_coder", "fast",
-				"-aac_tns", "0", "-aac_pns", "0", "-aac_is", "0", "-aac_ms", "0",
-				"-b:a", "128k", "-flags", "+bitexact", "-f", "adts", cPath, "-y")
-			if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
-				t.Fatalf("C encode: %v %q", err, out)
-			}
+			src := [][]float32{tc.src}
+			// DisableIS is not idle on a mono stream: with intensity stereo
+			// left on, the coding bandwidth widens by 15% (aacenc.c:1609-1610),
+			// so the two sides would code to 21200 Hz and 20000 Hz and this
+			// would stop being a same-settings comparison. DisableMS is left
+			// clear because M/S is a CPE tool and the option is inert on a
+			// mono stream on both sides: the C stream is byte-identical with
+			// and without -aac_ms 0 (verified against the pinned build).
+			cfg := enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1,
+				Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true}
+			cPath := filepath.Join(t.TempDir(), "c.adts")
+			cEncode(t, ffmpeg, rawF32Path(t, src), cfg, cPath)
 			cStream, err := os.ReadFile(cPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// DisableIS mirrors the -aac_is 0 above. It is not idle: with
-			// intensity stereo left on, the coding bandwidth widens by 15%
-			// (aacenc.c:1609-1610), so the two sides would code to 21200 Hz
-			// and 20000 Hz and this would stop being a same-settings
-			// comparison.
-			goStream := encodeADTSPlanar(t,
-				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true},
-				[][]float32{tc.src})
+			goStream := encodeADTSPlanar(t, cfg, src)
 
 			goSeq := windowSeqSCE(t, adtsFrames(t, goStream))
 			cSeq := windowSeqSCE(t, adtsFrames(t, cStream))
@@ -294,15 +280,11 @@ func TestPhase2DecodeGate(t *testing.T) {
 			if err := os.WriteFile(adts, stream, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			dec := ffmpegDecode(t, ffmpeg, adts) // interleaved for stereo
+			dec := ffmpegDecode(t, ffmpeg, adts, ch)
 			const delay = 1024
 			worst := math.Inf(1)
 			for c := range ch {
-				dc := make([]float32, len(dec)/ch)
-				for i := range dc {
-					dc[i] = dec[i*ch+c]
-				}
-				p := psnr(tc.src[c], dc, delay)
+				p := psnr(tc.src[c], dec[c], delay)
 				t.Logf("%s ch %d PSNR %.2f dB", tc.name, c, p)
 				worst = math.Min(worst, p)
 			}

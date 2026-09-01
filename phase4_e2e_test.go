@@ -7,43 +7,11 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
 )
-
-// cEncodeArgs runs the pinned C encoder with extra codec options.
-func cEncodeArgs(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
-	outPath string, extra ...string) []byte {
-	t.Helper()
-	args := make([]string, 0, 20+len(extra))
-	args = append(args, "-v", "error", "-y", "-f", "f32le",
-		"-ar", fmt.Sprint(rate), "-ac", fmt.Sprint(ch), "-i", rawPath,
-		"-c:a", "aac")
-	args = append(args, extra...)
-	args = append(args, "-b:a", fmt.Sprint(bitrate), "-flags", "+bitexact",
-		"-f", "adts", outPath)
-	cmd := exec.Command(ffmpeg, args...)
-	if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
-		t.Fatalf("C encode: %v %q", err, out)
-	}
-	stream, err := os.ReadFile(outPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return stream
-}
-
-// cEncodeTools runs the pinned C encoder with a chosen coder at its tool
-// DEFAULTS (tns/pns/is/ms all on), the Phase 4 same-settings reference.
-func cEncodeTools(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
-	coder, outPath string) []byte {
-	t.Helper()
-	return cEncodeArgs(t, ffmpeg, rawPath, rate, ch, bitrate, outPath,
-		"-aac_coder", coder)
-}
 
 // gateCastanetSecs is the length of the Phase 4 gate's castanet pair.
 //
@@ -82,7 +50,8 @@ func cEncodeTools(t *testing.T, ffmpeg, rawPath string, rate, ch, bitrate int,
 const gateCastanetSecs = 24
 
 // Phase 4 same-settings bounds, shared by every gate that scores a Go stream
-// against the C stream the same settings produced.
+// against the C stream the same settings produced; phase4Bounds
+// (oracle_harness_test.go) carries them into checkGateVsC.
 //
 // M/S and I/S trade quantization error between the two channels, so
 // per-channel PSNR is not stable under a stereo-tool decision flip; the gate
@@ -95,74 +64,6 @@ const (
 	gateWorstBound = -1.0 // dB, worst channel
 )
 
-// checkGateVsC scores one Go stream against the C stream produced from the
-// same source at the same settings: stream size, then decoded PSNR per
-// channel. Both streams are decoded by the same pinned ffmpeg, so the decoder
-// cancels out and what is left is the encoders' difference. cPath is the C
-// stream on disk (where cEncodeArgs wrote it); it is read once here, so the
-// size comparison and the PSNR comparison score the SAME bytes rather than one
-// in-memory copy for size and a re-read of the file for PSNR.
-//
-// It deliberately does NOT call t.Helper(): it makes four distinct assertions
-// (the empty-stream precondition, size, mean PSNR and worst-channel PSNR), and
-// marking it a helper reports all of them at the single call
-// site instead of at the line that actually failed.
-//
-//nolint:thelper // this is the gate body for one cell, not an assertion wrapper
-func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []byte, cPath string) {
-	cStream, err := os.ReadFile(cPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A gate scored against an empty stream is no gate: an empty cStream makes
-	// sizeDelta NaN, and math.Abs(NaN) > bound is false, so every size check
-	// would pass silently. Reject either side being empty up front.
-	if len(goStream) == 0 || len(cStream) == 0 {
-		t.Fatalf("empty stream, cannot gate: Go %d bytes, C %d bytes (%s)",
-			len(goStream), len(cStream), cPath)
-	}
-	sizeDelta := 100 * (float64(len(goStream)) - float64(len(cStream))) /
-		float64(len(cStream))
-	if math.Abs(sizeDelta) > gateSizeBound {
-		t.Errorf("stream size %+.2f%% vs C, gate demands within %.0f%%",
-			sizeDelta, gateSizeBound)
-	}
-
-	goPath := filepath.Join(dir, "go.adts")
-	if err := os.WriteFile(goPath, goStream, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	const delay = 1024
-	worstDelta := math.Inf(1)
-	meanDelta := 0.0
-	decG := ffmpegDecode(t, ffmpeg, goPath)
-	decC := ffmpegDecode(t, ffmpeg, cPath)
-	for c := range 2 {
-		dg := make([]float32, len(decG)/2)
-		dc := make([]float32, len(decC)/2)
-		for i := range dg {
-			dg[i] = decG[i*2+c]
-		}
-		for i := range dc {
-			dc[i] = decC[i*2+c]
-		}
-		pg := psnr(src[c], dg, delay)
-		pc := psnr(src[c], dc, delay)
-		t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
-			c, pg, pc, pg-pc, sizeDelta)
-		worstDelta = math.Min(worstDelta, pg-pc)
-		meanDelta += (pg - pc) / 2
-	}
-	if meanDelta < gateMeanBound {
-		t.Errorf("mean PSNR %.2f dB below the C encoder's, gate allows %.1f dB",
-			meanDelta, gateMeanBound)
-	}
-	if worstDelta < gateWorstBound {
-		t.Errorf("worst-channel PSNR %.2f dB below the C encoder's, backstop is %.1f dB",
-			worstDelta, gateWorstBound)
-	}
-}
-
 // TestPhase4ToolsGateVsC is the Phase 4 gate (issue #6): with TNS, PNS,
 // I/S and M/S active on BOTH sides (all tool defaults), for BOTH the NMR
 // and twoloop coders, the Go stream size must land within 3% of the C
@@ -171,9 +72,11 @@ func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []
 // ffmpeg.
 func TestPhase4ToolsGateVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	tonal := synthStereoNMR(44100*8, 44100)
-	casta := synthCastanets(44100*gateCastanetSecs, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*gateCastanetSecs, 44100, 0x5eed1234, 137)
+	sigs := []gateSignal{
+		newGateSignal(t, "stereo tonal", synthStereoNMR(44100*8, 44100)),
+		newGateSignal(t, sigStereoCastanets,
+			castanetsChannels(archChanStereo, 44100, 44100*gateCastanetSecs)),
+	}
 	for _, coder := range []struct {
 		name string
 		kind enc.CoderKind
@@ -181,26 +84,12 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 		{coderNMR, enc.CoderNMR},
 		{coderTwoLoop, enc.CoderTwoLoop},
 	} {
-		for _, sig := range []struct {
-			name string
-			src  [][]float32
-		}{
-			{"stereo tonal", tonal},
-			{sigStereoCastanets, [][]float32{casta, castaR}},
-		} {
+		for _, sig := range sigs {
 			for _, br := range []int{96000, 128000, 192000} {
 				t.Run(fmt.Sprintf("%s %s %dk", coder.name, sig.name, br/1000), func(t *testing.T) {
-					dir := t.TempDir()
-					rawPath := filepath.Join(dir, "src.f32")
-					writeRawF32(t, rawPath, sig.src)
-					cPath := filepath.Join(dir, "c.adts")
-					cEncodeTools(t, ffmpeg, rawPath, 44100, 2, br,
-						coder.name, cPath)
-					goStream := encodeADTSPlanar(t,
-						enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2,
-							Coder: coder.kind}, sig.src)
-
-					checkGateVsC(t, ffmpeg, dir, sig.src, goStream, cPath)
+					gateCellVsC(t, ffmpeg, sig,
+						enc.Config{SampleRate: 44100, Bitrate: br, Channels: 2, Coder: coder.kind},
+						phase4Bounds)
 				})
 			}
 		}
@@ -213,8 +102,7 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 // on it, so the streams are identical).
 func TestPhase4TNSAB(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	casta := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*6, 44100, 0x5eed1234, 137)
+	castaSrc := castanetsChannels(archChanStereo, 44100, 44100*6)
 	tonal := synthStereoNMR(44100*8, 44100)
 
 	run := func(src [][]float32, disableTNS bool) ([]byte, float64) {
@@ -225,19 +113,14 @@ func TestPhase4TNSAB(t *testing.T) {
 		if err := os.WriteFile(p, stream, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		dec := ffmpegDecode(t, ffmpeg, p)
+		dec := ffmpegDecode(t, ffmpeg, p, 2)
 		worst := math.Inf(1)
 		for c := range 2 {
-			d := make([]float32, len(dec)/2)
-			for i := range d {
-				d[i] = dec[i*2+c]
-			}
-			worst = math.Min(worst, psnr(src[c], d, 1024))
+			worst = math.Min(worst, psnr(src[c], dec[c], 1024))
 		}
 		return stream, worst
 	}
 
-	castaSrc := [][]float32{casta, castaR}
 	_, pOn := run(castaSrc, false)
 	_, pOff := run(castaSrc, true)
 	t.Logf("castanets: TNS on %.2f dB, off %.2f dB (%+.2f)", pOn, pOff, pOn-pOff)
@@ -268,9 +151,7 @@ func TestPhase4TNSAB(t *testing.T) {
 // redistributable, so the methodology is mirrored on the castanet pair.
 func TestPhase4FATEAnalogues(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	casta := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
-	castaR := synthCastanets(44100*6, 44100, 0x5eed1234, 137)
-	src := [][]float32{casta, castaR}
+	src := castanetsChannels(archChanStereo, 44100, 44100*6)
 
 	cases := []struct {
 		tool   string
@@ -296,15 +177,15 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 			if err := os.WriteFile(p, stream, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			dec := ffmpegDecode(t, ffmpeg, p)
+			dec := ffmpegDecode(t, ffmpeg, p, 2)
 			var err2 float64
 			n := 0
 			for c := range 2 {
-				for i := range len(dec)/2 - 1024 {
+				for i := range len(dec[c]) - 1024 {
 					if i >= len(src[c]) {
 						break
 					}
-					d := float64(src[c][i]) - float64(dec[(i+1024)*2+c])
+					d := float64(src[c][i]) - float64(dec[c][i+1024])
 					err2 += d * d
 					n++
 				}
@@ -353,48 +234,37 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 // and PASSES unfixed, because I/S reaches just 333 of the roughly thirty
 // thousand coded pair-bands on this corpus at this rate (about 1%): too small
 // an effect for a 3% size bound to see. It is kept as corroboration that Go
-// and C agree with the tool off, not as the gate. TestEncoderToolWiring (tool_wiring_test.go) is the
-// gate for DisableIS, because a counter that must reach exactly zero does not
-// care how many bands the tool would have claimed.
+// and C agree with the tool off, not as the gate. TestEncoderToolWiring
+// (tool_wiring_test.go) is the gate for DisableIS, because a counter that must
+// reach exactly zero does not care how many bands the tool would have claimed.
 //
 // One bitrate, because what is under test is which options reach which
 // decision rather than how the decision varies with rate; TestPhase4ToolsGateVsC
-// carries the rate sweep at the tool defaults.
+// carries the rate sweep at the tool defaults. The C side is derived from each
+// cell's enc.Config by cToolArgs, so the switch under test and its C mirror
+// are one literal rather than two.
 func TestPhase4NMRStereoSwitchesVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
 	// castanetsChannels is the single generator for this corpus (see its doc
 	// in arch_determinism_test.go); use it rather than open-coding the seeds so
 	// this gate cannot drift from the corpus every sibling gate scores against.
-	src := castanetsChannels(archChanStereo, 44100, 44100*gateCastanetSecs)
+	sig := newGateSignal(t, sigStereoCastanets,
+		castanetsChannels(archChanStereo, 44100, 44100*gateCastanetSecs))
 	const bitrate = 128000
 
 	for _, tc := range []struct {
 		name string
 		cfg  enc.Config // the switches under test
-		// cArgs are the ffmpeg options that mirror cfg. aac_ms is a
-		// tri-state defaulting to -1 (auto) and aac_is a boolean defaulting
-		// to 1, so 0 turns each off (aacenc.c:1655-1656).
-		cArgs []string
 	}{
-		{"noms", enc.Config{DisableMS: true}, []string{"-aac_ms", "0"}},
-		{"nois", enc.Config{DisableIS: true}, []string{"-aac_is", "0"}},
-		{"neither", enc.Config{DisableMS: true, DisableIS: true},
-			[]string{"-aac_ms", "0", "-aac_is", "0"}},
+		{"noms", enc.Config{DisableMS: true}},
+		{"nois", enc.Config{DisableIS: true}},
+		{"neither", enc.Config{DisableMS: true, DisableIS: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			rawPath := filepath.Join(dir, "src.f32")
-			writeRawF32(t, rawPath, src)
-			args := append([]string{"-aac_coder", coderNMR}, tc.cArgs...)
-			cPath := filepath.Join(dir, "c.adts")
-			cEncodeArgs(t, ffmpeg, rawPath, 44100, 2, bitrate, cPath, args...)
-
 			cfg := tc.cfg
 			cfg.SampleRate, cfg.Bitrate, cfg.Channels = 44100, bitrate, 2
 			cfg.Coder = enc.CoderNMR
-			goStream := encodeADTSPlanar(t, cfg, src)
-
-			checkGateVsC(t, ffmpeg, dir, src, goStream, cPath)
+			gateCellVsC(t, ffmpeg, sig, cfg, phase4Bounds)
 		})
 	}
 }
