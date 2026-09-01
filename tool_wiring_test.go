@@ -4,6 +4,8 @@ package aac
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"testing"
@@ -354,5 +356,68 @@ func TestNMRStereoGuardWiring(t *testing.T) {
 			"skipping nmrDecideStereo's PNS-stereo reservation when both stereo tools are "+
 			"off, so the term may have been deleted (issue #92)",
 			bothStats.PNSBands, msStats.PNSBands)
+	}
+}
+
+// pnsGoldenMidLowBitrate is the 64 kb/s point of the issue #93 reproduction.
+// It is not on the edge-config bitrate axis, which stops at 32 and 128 kb/s,
+// so it is named here rather than there.
+const pnsGoldenMidLowBitrate = 64_000
+
+// pnsDisabledGolden pins the DisablePNS stream for the cells where the
+// non-NMR MarkPNS guard (internal/enc/encoder.go) is load-bearing. The pns
+// gate above cannot see that guard: its counter assertion stays at zero under
+// the mutant because SearchForPNS, gated separately, is what sets NoiseBT, and
+// its byte assertion only requires the two directions to differ, which they
+// still do under the mutant. Only pinning the switch-set side closes it
+// (issue #97).
+//
+// The cells are the three that the reproduction on issue #93 showed move when
+// the guard's DisablePNS term is removed (2 s castanets at 44100 Hz, the same
+// input the gate above uses): mono twoloop 32 kb/s (7664 to 7660 bytes),
+// stereo twoloop 32 kb/s (same size, content differs) and stereo twoloop
+// 64 kb/s (16991 to 17000 bytes). Every CoderFast cell and both coders at
+// 128 kb/s were byte-identical under the mutant, so pinning them would add
+// maintenance without adding coverage.
+//
+// Verified 2026-09-01 by applying that mutant: all three cells fail here
+// while the pns gate above stays green.
+var pnsDisabledGolden = []struct {
+	cell toolWiringCell
+	sha  string
+}{
+	{toolWiringCell{1, edgeBitrateLow}, "0db4b9e34b02a29aa361827080d4fbf4d0ebf7c533f030acb7537f443fdf9384"},
+	{toolWiringCell{2, edgeBitrateLow}, "3c0fe680d4aaf99159b2c34951f2a3410d2488d6e4c3da372b73a998f11cb03c"},
+	{toolWiringCell{2, pnsGoldenMidLowBitrate}, "d889f14447100d430385aae6b9e8e16a363b2d56568ba5b37ece4231f3702d79"},
+}
+
+// TestEncoderPNSDisabledGolden asserts the SHA-256 of the concatenated access
+// units for each cell in pnsDisabledGolden, CoderTwoLoop with DisablePNS set.
+// The encoder is arch-deterministic (TestEncoderArchDeterminism), so one set
+// of goldens serves every CI arch. An intentional change to the twoloop
+// quantizer or to PNS marking moves these; the failure message prints the
+// observed hash, which is the value to re-pin after confirming the change was
+// meant.
+func TestEncoderPNSDisabledGolden(t *testing.T) {
+	inputs := edgeInputCache{}
+	for _, g := range pnsDisabledGolden {
+		t.Run("twoloop_"+g.cell.name(), func(t *testing.T) {
+			src := inputs.get(g.cell.chLabel(), toolWiringRate, toolWiringFrames)
+			cfg := EncoderConfig{
+				SampleRate: toolWiringRate,
+				Channels:   g.cell.channels,
+				Bitrate:    g.cell.bitrate,
+				Coder:      CoderTwoLoop,
+				DisablePNS: true,
+			}
+			aus, _ := encodeCollect(t, cfg, src)
+			sum := sha256.Sum256(bytes.Join(aus, nil))
+			got := hex.EncodeToString(sum[:])
+			if got != g.sha {
+				t.Errorf("DisablePNS twoloop stream sha256 = %s, want %s: either the "+
+					"non-NMR MarkPNS guard no longer holds CanPNS all-false with PNS off, "+
+					"or the twoloop quantizer changed on purpose (then re-pin)", got, g.sha)
+			}
+		})
 	}
 }

@@ -696,11 +696,14 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			// clear this term is already true, so the mutation cannot touch that
 			// side at all, and it moves only the switch-set side. Neither
 			// assertion pins either side's bytes to anything, so neither can
-			// observe the shift. Swapping the
-			// corpus would NOT close this gap: mono_32000 is already a pns cell
-			// and already differs above, yet the gate stays green. That is a
-			// COVERAGE GAP in the assertion, not unreachability; issue #93's
-			// premise is wrong for this guard, and it must NOT be deleted.
+			// observe the shift. Swapping the corpus would NOT close this gap:
+			// mono_32000 is already a pns cell and already differs above, yet
+			// the gate stays green. That was a COVERAGE GAP in the assertion,
+			// not unreachability; issue #93's premise is wrong for this guard,
+			// and it must NOT be deleted. TestEncoderPNSDisabledGolden
+			// (tool_wiring_test.go) now pins the switch-set bytes for exactly
+			// the three cells listed above, and it is what fails when this
+			// term is removed (issue #97).
 			if !e.cfg.DisablePNS && !tnsFirst {
 				if e.trace != nil {
 					e.trace = append(e.trace, "mark_pns")
