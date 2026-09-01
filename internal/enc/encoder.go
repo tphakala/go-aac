@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
 // Package enc implements the AAC encoder frame pipeline: input buffering,
-// window switching, MDCT, psychoacoustic analysis, rate control and
-// raw_data_block bitstream writing. Mirrors libavcodec/aacenc.c
-// @ d09d5afc3a, restricted to Phase 2 scope: mono SCE or stereo CPE, the
-// full LAME window decision and 3GPP psy model, the fast coder, no
-// TNS/PNS/MS/IS. The package emits raw AAC access units; ADTS framing is
-// applied by the caller (the root package owns the ADTS writer).
+// window switching, MDCT, psychoacoustic analysis, the coding tools (TNS,
+// PNS, M/S, I/S), rate control and raw_data_block bitstream writing. Mirrors
+// libavcodec/aacenc.c @ d09d5afc3a for mono SCE and stereo CPE at 44100 and
+// 48000 Hz, with the full LAME window decision and 3GPP psy model and all
+// three coders (NMR, twoloop, fast). The package emits raw AAC access units;
+// ADTS framing is applied by the caller (the root package owns the ADTS
+// writer).
 package enc
 
 import (
@@ -56,7 +57,7 @@ const (
 
 // Config selects the encoder parameters.
 type Config struct {
-	SampleRate    int       // 44100 or 48000 in Phase 2
+	SampleRate    int       // 44100 or 48000
 	Bitrate       int       // bits per second, total across channels
 	Channels      int       // 1 (SCE) or 2 (CPE)
 	Cutoff        int       // user bandwidth override in Hz; 0 = automatic (avctx->cutoff)
@@ -76,7 +77,7 @@ type Config struct {
 
 // Encoder is the AAC encoder state: everything is preallocated here so the
 // encode path is allocation-free in steady state (docs/go-design.md
-// allocation policy). Mirrors the Phase 2 subset of AACEncContext
+// allocation policy). Mirrors the mono/stereo AAC-LC subset of AACEncContext
 // (libavcodec/aacenc.h @ d09d5afc3a).
 type Encoder struct {
 	cfg              Config
@@ -107,18 +108,20 @@ type Encoder struct {
 	mdct128  *mdct.MDCT
 	pb       *bits.Writer
 	pbBuf    []byte
-	// Per-frame tool activity flags for the coeffs restore in the rate
-	// loop (aacenc.c:1337-1345); all tools are off in Phase 2 so these
-	// stay zero, but the restore seam is wired now
-	// (docs/porting-guide.md pitfall 2).
+	// Per-frame tool activity flags for the coeffs restore in the rate loop
+	// (aacenc.c:1337-1345). Each is raised on the live path of its tool
+	// (tnsMode by both TNS arms, isMode by the I/S decision, msMode when a
+	// CPE codes any band mid/side); predMode stays zero because prediction is
+	// not part of AAC-LC. The restore seam fires whenever the loop iterates
+	// after any of them was raised (docs/porting-guide.md pitfall 2).
 	isMode, msMode, tnsMode, predMode int
 	trace                             []string // tool-call ordering trace; nil (and dead) outside tests
 	stats                             Stats    // tool-usage counters (aacenc.h:232-239)
 }
 
-// New returns an encoder for cfg. Mirrors the Phase 2 subset of
-// aacenc.c:aac_encode_init @ d09d5afc3a: samplerate index lookup, bitrate
-// clamping, lambda default, coding bandwidth computation and psy init.
+// New returns an encoder for cfg. Mirrors aacenc.c:aac_encode_init
+// @ d09d5afc3a: samplerate index lookup, bitrate clamping, lambda default,
+// coding bandwidth computation and psy init.
 func New(cfg Config) (*Encoder, error) {
 	e := &Encoder{}
 	if err := e.Reset(cfg); err != nil {
@@ -140,7 +143,7 @@ func (e *Encoder) Reset(cfg Config) error {
 	case 44100:
 		idx = 4
 	default:
-		return fmt.Errorf("enc: unsupported sample rate %d (Phase 2 supports 44100 and 48000)", cfg.SampleRate)
+		return fmt.Errorf("enc: unsupported sample rate %d (44100 or 48000)", cfg.SampleRate)
 	}
 	if cfg.Channels < 1 || cfg.Channels > 2 {
 		return fmt.Errorf("enc: unsupported channel count %d (1 or 2)", cfg.Channels)
@@ -277,8 +280,8 @@ func (e *Encoder) Channels() int { return e.cfg.Channels }
 // [-1, 1] (one slice per channel) and appends one raw AAC access unit to
 // dst. Pass nil samples to flush; a shorter final frame is zero-padded.
 // Returns dst unchanged during priming (the first call) and once the flush
-// has drained all queued samples. Mirrors the Phase 2 subset of
-// aacenc.c:aac_encode_frame @ d09d5afc3a.
+// has drained all queued samples. Mirrors aacenc.c:aac_encode_frame
+// @ d09d5afc3a.
 func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 	if samples != nil {
 		if len(samples) != e.cfg.Channels {
@@ -884,9 +887,10 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			if ratio > 0.9 && ratio < 1.1 {
 				return
 			}
-			// Restore coeffs from pcoeffs when tools modified them
-			// (aacenc.c:1337-1345); no tool is active in Phase 2 so the
-			// flags stay zero, but the seam is the C's.
+			// Restore coeffs from pcoeffs when a tool modified them
+			// (aacenc.c:1337-1345). isMode, msMode and tnsMode are raised on
+			// the live tool paths above, so this runs in normal operation
+			// whenever the loop iterates after a tool fired.
 			if e.isMode != 0 || e.msMode != 0 || e.tnsMode != 0 || e.predMode != 0 {
 				for ch := range chans {
 					cpe.Ch[ch].Coeffs = cpe.Ch[ch].PCoeffs
