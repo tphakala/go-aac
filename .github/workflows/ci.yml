@@ -61,13 +61,21 @@ jobs:
       # it, so the margin against a slow or loaded runner is smaller than it was.
       # Blowing the default surfaces as a panic stack dump that reads like a
       # hang rather than like a slow runner, which is the issue #62 failure mode.
+      #
+      # -count=1 on every test step here, not only on the oracle job and the
+      # non-race step below. actions/setup-go restores GOCACHE, which holds Go's
+      # test-result cache, so on a "Re-run all jobs" against an unchanged SHA a
+      # step without it can serve a cached ok and report green having run no
+      # tests. The price is that a re-run pays the full race-lane cost (about
+      # 2 minutes per lane) instead of returning instantly; a re-run that does
+      # not re-run is worth less than that (issue #94).
       - name: Run tests
         if: matrix.os != 'ubuntu-latest'
-        run: go test -race -timeout 20m ./...
+        run: go test -count=1 -race -timeout 20m ./...
 
       - name: Run tests with coverage
         if: matrix.os == 'ubuntu-latest'
-        run: go test -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -count=1 -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
@@ -82,7 +90,7 @@ jobs:
       # assembly; its scalar kernels are byte-identical but must be tested on
       # every arch this matrix covers or they can rot unnoticed.
       - name: Run tests (noasm)
-        run: go test -race -timeout 20m -tags noasm ./...
+        run: go test -count=1 -race -timeout 20m -tags noasm ./...
 
       # The non-race pass. Until this step existed, the ONLY non-race lane was
       # the differential-oracle job, which is ubuntu-latest, so every test whose
