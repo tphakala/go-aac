@@ -156,24 +156,6 @@ var toolGates = []toolGate{
 	},
 }
 
-// assertDecodable checks that a variant is not merely different but still a
-// well-formed stream carrying signal, the same three checks
-// TestEncoderMidSideWiring makes. A tool switch that produced an undecodable or
-// silent stream would otherwise satisfy every counter assertion here.
-func assertDecodable(t *testing.T, label string, asc []byte, aus [][]byte, src [][]float32) {
-	t.Helper()
-	perChannel, pcmS16, channels := decodeAll(t, asc, aus)
-	if channels != len(src) {
-		t.Errorf("%s: decoded %d channels, want %d", label, channels, len(src))
-	}
-	if want := len(src[0]) + EncoderDelay; perChannel != want {
-		t.Errorf("%s: decoded %d samples per channel, want %d", label, perChannel, want)
-	}
-	if isDigitalSilence(pcmS16) {
-		t.Errorf("%s: decoded output is digital silence", label)
-	}
-}
-
 // checkToolWiringCell encodes one cell twice, once with the gate's switch clear
 // and once with it set, and makes every per-cell assertion. It returns the
 // counter observed with the switch CLEAR so the caller can fold it into the
