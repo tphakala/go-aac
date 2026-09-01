@@ -49,15 +49,22 @@ const toolWiringRate = 44100
 // so the length is fixed here instead.
 const toolWiringSeconds = 2
 
-// toolWiringCell is one (channel layout, bitrate) point of a gate's sweep.
+// toolWiringFrames is toolWiringSeconds in whole frames, the unit
+// edgeInputCache is keyed on.
+const toolWiringFrames = toolWiringRate * toolWiringSeconds / FrameSize
+
+// toolWiringCell is one (channel layout, bitrate) point of a gate's sweep. The
+// layout is carried as the channel count alone; the corpus label is derived
+// from it, so the two cannot disagree.
 type toolWiringCell struct {
-	chLabel  string
 	channels int
 	bitrate  int
 }
 
+func (c toolWiringCell) chLabel() string { return chLabelFor(c.channels) }
+
 func (c toolWiringCell) name() string {
-	return fmt.Sprintf("%s_%d", c.chLabel, c.bitrate)
+	return fmt.Sprintf("%s_%d", c.chLabel(), c.bitrate)
 }
 
 // Cells are chosen per tool rather than shared, because the tools do not all
@@ -71,7 +78,7 @@ var (
 	// enough: DisableTNS is read once into useTNS and gates both arms, and the
 	// arms are selected by coder, which the coder axis already sweeps, not by
 	// channel layout.
-	tnsCells = []toolWiringCell{{archChanStereo, 2, edgeBitrateMid}}
+	tnsCells = []toolWiringCell{{2, edgeBitrateMid}}
 
 	// PNS needs BOTH layouts, because the NMR arm reaches MarkPNS through two
 	// separate guards, one on chans == 1 and one on chans == 2. Testing a single
@@ -80,8 +87,8 @@ var (
 	// 0 bands at 96k, 128k and 192k) and fires well below it (121 bands at the
 	// 32 kb/s point used here).
 	pnsCells = []toolWiringCell{
-		{archChanMono, 1, edgeBitrateLow},
-		{archChanStereo, 2, edgeBitrateMid},
+		{1, edgeBitrateLow},
+		{2, edgeBitrateMid},
 	}
 
 	// Intensity stereo is a CPE tool, so both cells are stereo. Both bitrates
@@ -89,8 +96,8 @@ var (
 	// fast reaches only 3 bands, and at 128 kb/s twoloop reaches only 9. Their
 	// sum is what makes the precondition robust.
 	isCells = []toolWiringCell{
-		{archChanStereo, 2, edgeBitrateLow},
-		{archChanStereo, 2, edgeBitrateMid},
+		{2, edgeBitrateLow},
+		{2, edgeBitrateMid},
 	}
 )
 
@@ -240,6 +247,7 @@ func TestEncoderToolWiring(t *testing.T) {
 		t.Skip("skipped under -race: single-goroutine and build-independent, and too " +
 			"costly to repeat across six race lanes; see edge_soak_race_test.go")
 	}
+	inputs := edgeInputCache{}
 	for _, gate := range toolGates {
 		t.Run(gate.name, func(t *testing.T) {
 			// Without this a gate declared with no cells runs no subtests, the
@@ -262,7 +270,7 @@ func TestEncoderToolWiring(t *testing.T) {
 					var usedWithTool int64
 					ran, allPassed := 0, true
 					for _, cell := range gate.cells {
-						src := edgeSoakInput(cell.chLabel, toolWiringRate, toolWiringSeconds)
+						src := inputs.get(cell.chLabel(), toolWiringRate, toolWiringFrames)
 						ok := t.Run(cell.name(), func(t *testing.T) {
 							usedWithTool += checkToolWiringCell(t, &gate, tc.coder, cell, src)
 							ran++
