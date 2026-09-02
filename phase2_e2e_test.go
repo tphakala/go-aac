@@ -14,7 +14,8 @@ import (
 )
 
 // encodeADTSPlanar runs the encoder over planar src and returns an ADTS
-// stream (Phase 2: mono or stereo).
+// stream (mono or stereo; it is the Go side of every same-settings gate,
+// through gateCellVsC).
 func encodeADTSPlanar(t *testing.T, cfg enc.Config, src [][]float32) []byte {
 	t.Helper()
 	e, err := enc.New(cfg)
@@ -191,13 +192,15 @@ func TestWindowSequenceVsC(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := [][]float32{tc.src}
-			// DisableIS is not idle on a mono stream: with intensity stereo
-			// left on, the coding bandwidth widens by 15% (aacenc.c:1609-1610),
-			// so the two sides would code to 21200 Hz and 20000 Hz and this
-			// would stop being a same-settings comparison. DisableMS is left
-			// clear because M/S is a CPE tool and the option is inert on a
-			// mono stream on both sides: the C stream is byte-identical with
-			// and without -aac_ms 0 (verified against the pinned build).
+			// DisableIS is not idle on a mono stream, so it is set here rather
+			// than left to the tools-off intent alone: with intensity stereo on,
+			// the coding bandwidth widens by 15% (aacenc.c:1609-1610, mirrored
+			// in internal/enc/encoder.go), 20000 Hz to 21200 Hz at this rate.
+			// cToolArgs carries every switch in cfg to the C side, so the two
+			// encoders cannot disagree about it. DisableMS is left clear because
+			// M/S is a CPE tool: the C stream is byte-identical with and without
+			// -aac_ms 0 on this mono input (verified against the pinned build),
+			// so the option would say nothing.
 			cfg := enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1,
 				Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true}
 			cPath := filepath.Join(t.TempDir(), "c.adts")

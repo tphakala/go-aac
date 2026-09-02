@@ -64,11 +64,14 @@ jobs:
       #
       # -count=1 on every test step here, not only on the oracle job and the
       # non-race step below. actions/setup-go restores GOCACHE, which holds Go's
-      # test-result cache, so on a "Re-run all jobs" against an unchanged SHA a
-      # step without it can serve a cached ok and report green having run no
-      # tests. The price is that a re-run pays the full race-lane cost (about
-      # 2 minutes per lane) instead of returning instantly; a re-run that does
-      # not re-run is worth less than that (issue #94).
+      # test-result cache, and keys that cache on go.sum rather than on the
+      # commit. So a step without the flag can serve a cached ok and report
+      # green having run no tests, on a "Re-run all jobs" against an unchanged
+      # SHA and equally on any later push whose Go inputs are unchanged, such as
+      # a docs-only or workflow-only commit. The price is paid on every run that
+      # arrives with a warm cache, not only on a re-run: roughly the 2 minutes
+      # the ubuntu race lane takes (see the note below), more on the others. A
+      # lane that does not run its tests is worth less than that (issue #94).
       - name: Run tests
         if: matrix.os != 'ubuntu-latest'
         run: go test -count=1 -race -timeout 20m ./...

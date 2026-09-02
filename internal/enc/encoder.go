@@ -51,7 +51,7 @@ type CoderKind int
 // Coder kinds. Mirror enum AACCoder @ d09d5afc3a.
 const (
 	CoderNMR     CoderKind = iota // noise-to-mask ratio trellis (default)
-	CoderFast                     // fast two-loop heuristic (Phases 1-2)
+	CoderFast                     // fast two-loop heuristic
 	CoderTwoLoop                  // ISO 13818-7 Appendix C two-loop search
 )
 
@@ -113,14 +113,18 @@ type Encoder struct {
 	// (tnsMode by both TNS arms, isMode by the I/S decision, msMode when a
 	// CPE codes any band mid/side); predMode stays zero because prediction is
 	// not part of AAC-LC. The restore seam fires whenever the loop iterates
-	// after any of them was raised (docs/porting-guide.md pitfall 2).
+	// after any of them was raised, on the ABR arm of the rate loop; the
+	// StrictBitrate arm retries above the restore, in the C as here
+	// (aacenc.c:1297-1305), so a strict retry re-runs the tools on the
+	// already-modified coefficients (docs/porting-guide.md pitfall 2).
 	isMode, msMode, tnsMode, predMode int
 	trace                             []string // tool-call ordering trace; nil (and dead) outside tests
 	stats                             Stats    // tool-usage counters (aacenc.h:232-239)
 }
 
-// New returns an encoder for cfg. Mirrors aacenc.c:aac_encode_init
-// @ d09d5afc3a: samplerate index lookup, bitrate clamping, lambda default,
+// New returns an encoder for cfg. Mirrors aacenc.c:aac_encode_init for the
+// single SCE or CPE element of the v1 channel maps @ d09d5afc3a: samplerate
+// index lookup, bitrate clamping, lambda default,
 // coding bandwidth computation and psy init.
 func New(cfg Config) (*Encoder, error) {
 	e := &Encoder{}
@@ -280,8 +284,8 @@ func (e *Encoder) Channels() int { return e.cfg.Channels }
 // [-1, 1] (one slice per channel) and appends one raw AAC access unit to
 // dst. Pass nil samples to flush; a shorter final frame is zero-padded.
 // Returns dst unchanged during priming (the first call) and once the flush
-// has drained all queued samples. Mirrors aacenc.c:aac_encode_frame
-// @ d09d5afc3a.
+// has drained all queued samples. Mirrors aacenc.c:aac_encode_frame for the
+// single SCE or CPE element of the v1 channel maps @ d09d5afc3a.
 func (e *Encoder) EncodeFrame(dst []byte, samples [][]float32) ([]byte, error) {
 	if samples != nil {
 		if len(samples) != e.cfg.Channels {
@@ -893,7 +897,9 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			// Restore coeffs from pcoeffs when a tool modified them
 			// (aacenc.c:1337-1345). isMode, msMode and tnsMode are raised on
 			// the live tool paths above, so this runs in normal operation
-			// whenever the loop iterates after a tool fired.
+			// whenever THIS arm iterates after a tool fired. The StrictBitrate
+			// arm above continues before reaching it, exactly as the C does
+			// (aacenc.c:1297-1305).
 			if e.isMode != 0 || e.msMode != 0 || e.tnsMode != 0 || e.predMode != 0 {
 				for ch := range chans {
 					cpe.Ch[ch].Coeffs = cpe.Ch[ch].PCoeffs
@@ -902,7 +908,7 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			// Only the `frameBits >= maxFrameBits*chans-3` arm can retry without
 			// bound: the other two are capped by its<5. So the loop can only spin
 			// forever while the frame is stuck at the buffer ceiling AND lambda has
-			// stopped moving -- pinned at one of its clamps, so the next pass would
+			// stopped moving, pinned at one of its clamps, so the next pass would
 			// quantize identically, land on the identical frameBits, take the
 			// identical branch, and pin lambda again. The C spins there
 			// (aacenc.c:1309-1350, inside do{}while(1)).
@@ -911,7 +917,7 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 			// routine: at a comfortable bitrate the frame comes in well under budget,
 			// ratio > 1 drives lambda to the 65536 ceiling, and it sits there while
 			// its<5 ends the loop. Guarding on the pin alone rejects ordinary 128 kbps
-			// encodes -- the C differential gate caught exactly that.
+			// encodes: the C differential gate caught exactly that.
 			if e.lambda == prevLambda && frameBits >= maxFrameBits*chans-3 {
 				e.fail(fmt.Errorf("enc: rate control cannot converge at %d bps, %d Hz: "+
 					"lambda is pinned at %g and the frame stays at %d bits, at the %d-bit ceiling",

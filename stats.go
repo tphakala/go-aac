@@ -28,11 +28,11 @@ type Stats struct {
 	// alternate (internal/coder/stereo_tools.go SearchForIS, mirroring
 	// aacenc_is.c). So on those two coders MSBands can be nonzero with
 	// DisableMS set, and it is attributable to DisableMS only on CoderNMR,
-	// whose pre-quantization stereo decision is the flag's sole writer.
-	// Measured on the castanets corpus at 32 kb/s stereo, CoderTwoLoop
-	// reports 28 with the switch set. The bitstream is correct either way,
-	// since that ms_used is spec-mandated I/S phase signalling; only the
-	// counter's name is loose.
+	// whose pre-quantization stereo decision is the only code that sets it.
+	// Measured on the 2 s castanets input of tool_wiring_test.go at 44100 Hz
+	// and 32 kb/s stereo, CoderTwoLoop reports 28 with the switch set. The
+	// bitstream is correct either way, since that ms_used is spec-mandated I/S
+	// phase signalling; only the counter's name is loose.
 	MSBands    int64
 	ISBands    int64   // of which intensity coded
 	MeanLambda float64 // mean per-frame operating lambda (the C's Qavg)

@@ -49,9 +49,11 @@ import (
 // the C by only about 0.1 dB.
 const gateCastanetSecs = 24
 
-// Phase 4 same-settings bounds, shared by every gate that scores a Go stream
-// against the C stream the same settings produced; phase4Bounds
-// (oracle_harness_test.go) carries them into checkGateVsC.
+// The Phase 4 same-settings bounds; phase4Bounds (oracle_harness_test.go)
+// carries them into checkGateVsC for the gates below. Not every gate that
+// scores a Go stream against the C stream uses them: phase3Bounds sits beside
+// phase4Bounds with the older worst-channel rule, which TestPhase3NMRGateVsC
+// keeps.
 //
 // M/S and I/S trade quantization error between the two channels, so
 // per-channel PSNR is not stable under a stereo-tool decision flip; the gate
@@ -67,9 +69,9 @@ const (
 // TestPhase4ToolsGateVsC is the Phase 4 gate (issue #6): with TNS, PNS,
 // I/S and M/S active on BOTH sides (all tool defaults), for BOTH the NMR
 // and twoloop coders, the Go stream size must land within 3% of the C
-// encoder's and the decoded PSNR within 0.5 dB of the C encoder's own
-// PSNR per case, and the Go streams must decode cleanly under the pinned
-// ffmpeg.
+// encoder's and the decoded PSNR, meaned over channels, within 0.5 dB of the
+// C encoder's own, with the worst channel within 1.0 dB, and the Go streams
+// must decode cleanly under the pinned ffmpeg.
 func TestPhase4ToolsGateVsC(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
 	sigs := []gateSignal{

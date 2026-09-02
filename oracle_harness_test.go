@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -34,9 +35,16 @@ const oracleTimeout = 2 * time.Minute
 
 // runOracle runs ffmpeg with args under oracleTimeout and returns its stdout.
 // Every caller passes -v error, so anything on stderr is a failure. The three
-// ways it can fail are reported apart, because they need different fixes:
-// the binary could not be started (GOAAC_FFMPEG names something that is not
-// executable), it ran out of time, or it ran and failed or complained.
+// ways it can fail are reported apart, because they need different fixes: it
+// never started, it ran out of time, or it ran and failed or complained.
+//
+// "Never started" is keyed on a nil ProcessState rather than on an error type.
+// Wait sets ProcessState for every process that actually ran, including one the
+// deadline killed, while both spawn failures leave it nil: *exec.Error when a
+// bare name misses on PATH, and *fs.PathError from fork/exec when a path is
+// missing, a directory, or not executable. GOAAC_FFMPEG is a path that
+// ffmpegBin has stat'ed, so it is the second of those that this test suite can
+// actually produce.
 func runOracle(t *testing.T, ffmpeg string, args ...string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), oracleTimeout)
@@ -46,13 +54,12 @@ func runOracle(t *testing.T, ffmpeg string, args ...string) []byte {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if _, spawn := errors.AsType[*exec.Error](err); spawn {
-		t.Fatalf("cannot run GOAAC_FFMPEG=%q: %v", ffmpeg, err)
-	}
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	switch {
+	case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		t.Fatalf("ffmpeg did not finish within %v: %v", oracleTimeout, args)
-	}
-	if err != nil {
+	case err != nil && cmd.ProcessState == nil:
+		t.Fatalf("cannot run GOAAC_FFMPEG=%q: %v", ffmpeg, err)
+	case err != nil:
 		t.Fatalf("ffmpeg failed: %v\n%s", err, stderr.String())
 	}
 	if stderr.Len() > 0 {
@@ -78,14 +85,22 @@ func cCoderName(kind enc.CoderKind) string {
 // cToolArgs derives the ffmpeg codec options that mirror cfg, so a Go config
 // and its C reference are one literal rather than two that a transposed table
 // row could silently unpair. The zero values of the switches are the C
-// defaults (aac_tns 1, aac_pns 1, aac_ms -1 auto, aac_is 1, aacenc.c:1651-1656
+// defaults (aac_tns 1, aac_pns 1, aac_ms -1 auto, aac_is 1, aacenc.c:1655-1658
 // @ d09d5afc3a), so only a switched-off tool emits an option: aac_ms is a
 // tri-state and aac_is a boolean, and 0 turns each off. The coder is always
-// named, because the Go zero value and the C default agree today but nothing
-// else keeps them agreeing. A field with no C mirror is a test-author error,
-// not a silent omission.
+// named, because the Go zero value and the C default (AAC_CODER_NMR,
+// aacenc.c:1651) agree today but nothing else keeps them agreeing. A field
+// with no C mirror is a test-author error, not a silent omission.
 func cToolArgs(t *testing.T, cfg enc.Config) []string {
 	t.Helper()
+	// The doc above promises that a field with no C mirror is a test-author
+	// error rather than a silent omission; this is what enforces it. cEncode
+	// mirrors SampleRate, Bitrate and Channels; the switches below mirror the
+	// rest; StrictBitrate fails loudly just above. A new field lands here.
+	if n := reflect.TypeFor[enc.Config]().NumField(); n != 11 {
+		t.Fatalf("enc.Config has %d fields, cEncode and cToolArgs mirror 11: "+
+			"add the ffmpeg option for the new field (or a t.Fatal for it) and bump this count", n)
+	}
 	if cfg.StrictBitrate {
 		t.Fatal("cToolArgs: enc.Config.StrictBitrate has no ffmpeg option mirror here")
 	}
@@ -137,6 +152,14 @@ func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
 	raw := runOracle(t, ffmpeg, "-v", "error", "-i", path,
 		"-f", "f32le", "-c:a", "pcm_f32le", "-")
 	n := len(raw) / 4 / channels
+	// A decode that produced nothing is not a result to score: psnr would
+	// divide by zero and return NaN, and every bound below is a `<` comparison
+	// that NaN passes. This is the decode-side twin of checkGateVsC's
+	// empty-stream precondition.
+	if n == 0 {
+		t.Fatalf("ffmpeg decoded %s to no samples (%d bytes, %d channels)",
+			path, len(raw), channels)
+	}
 	out := make([][]float32, channels)
 	for c := range out {
 		out[c] = make([]float32, n)
@@ -211,17 +234,18 @@ var (
 	// phase3Bounds predate the mean rule: TNS is off on both sides and the
 	// worst channel alone is gated, at the tighter figure. Kept as they were
 	// when the phase 3 gate scored itself, so folding it into checkGateVsC
-	// changed the code and not the contract.
-	phase3Bounds = gateBounds{size: 3.0, mean: math.Inf(-1), worst: -0.5}
+	// changed the code and not the contract. The size rule is the same 3% as
+	// Phase 4's, so it takes the same constant; only the PSNR rule differs.
+	phase3Bounds = gateBounds{size: gateSizeBound, mean: math.Inf(-1), worst: -0.5}
 )
 
 // checkGateVsC scores one Go stream against the C stream produced from the
 // same source at the same settings: stream size, then decoded PSNR per
 // channel. Both streams are decoded by the same pinned ffmpeg, so the decoder
 // cancels out and what is left is the encoders' difference. cPath is the C
-// stream on disk (where cEncode wrote it); it is read once here, so the size
-// comparison and the PSNR comparison score the SAME bytes rather than one
-// in-memory copy for size and a re-read of the file for PSNR.
+// stream on disk (where cEncode wrote it); the size check reads it and the
+// PSNR check hands the same path to ffmpeg, so both score the one artifact
+// cEncode wrote and no in-memory copy can drift from it.
 //
 // It deliberately does NOT call t.Helper(): it makes four distinct assertions
 // (the empty-stream precondition, size, mean PSNR and worst-channel PSNR), and
@@ -279,7 +303,9 @@ func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []
 // gateCellVsC runs one same-settings cell end to end: the C encoder and the
 // Go encoder over sig at cfg, then checkGateVsC with b.
 //
-// Not a t.Helper(), for the same reason as checkGateVsC.
+// Not a t.Helper() either, for a different reason: it makes no assertions, but
+// leaving it unmarked reports a failure at the C encode or the Go encode line
+// rather than collapsing both onto the subtest's call site.
 //
 //nolint:thelper // this is the cell body, not an assertion wrapper
 func gateCellVsC(t *testing.T, ffmpeg string, sig gateSignal, cfg enc.Config, b gateBounds) {

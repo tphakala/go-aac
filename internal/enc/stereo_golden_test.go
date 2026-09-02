@@ -92,9 +92,10 @@ func stereoSynthLong(lcg *stereoLCG, sce *coder.SingleChannelElement,
 
 // TestNMRDecideStereoAgainstC walks the cnmr.c stereo fixtures: the option
 // defaults, then each stereo option switched off alone. Those are all the
-// combinations the encoder can reach, because it skips nmrDecideStereo when
-// both are off (the guard at the call site, aacenc.c:1216-1217), which is why
-// there is no "neither" fixture. Until issue #92 only the defaults were
+// combinations the public EncoderConfig can reach: it spells mid/side only as
+// auto or off, and the encoder skips nmrDecideStereo when both are off (the
+// guard at the call site, aacenc.c:1216-1217), which is why there is no
+// "neither" fixture. Until issue #92 only the defaults were
 // reachable, so only they were pinned; the switched-off paths were covered
 // end to end (TestPhase4NMRStereoSwitchesVsC) and oracle-free
 // (TestNMRStereoGuardWiring) but had no per-function vector (issue #97). The

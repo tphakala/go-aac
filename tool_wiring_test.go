@@ -174,7 +174,7 @@ var toolGates = []toolGate{
 // stays a plain three-level sweep; the assertions below are the substance and
 // they read better away from the loop bookkeeping.
 //
-// gate is taken by pointer only to avoid copying the 88-byte struct (gocritic
+// gate is taken by pointer only to avoid copying the 80-byte struct (gocritic
 // hugeParam), matching statsFromInternal in stats.go; the callee never mutates
 // it.
 //
@@ -360,8 +360,9 @@ func TestNMRStereoGuardWiring(t *testing.T) {
 }
 
 // pnsGoldenMidLowBitrate is the 64 kb/s point of the issue #93 reproduction.
-// It is not on the edge-config bitrate axis, which stops at 32 and 128 kb/s,
-// so it is named here rather than there.
+// It is not on the edge-config bitrate axis, which has no in-range point
+// between edgeBitrateLow and edgeBitrateMid, so it is named here rather
+// than there.
 const pnsGoldenMidLowBitrate = 64_000
 
 // pnsDisabledGolden pins the DisablePNS stream for the cells where the
@@ -393,15 +394,20 @@ var pnsDisabledGolden = []struct {
 
 // TestEncoderPNSDisabledGolden asserts the SHA-256 of the concatenated access
 // units for each cell in pnsDisabledGolden, CoderTwoLoop with DisablePNS set.
-// The encoder is arch-deterministic (TestEncoderArchDeterminism), so one set
-// of goldens serves every CI arch. An intentional change to the twoloop
+// The encoder is arch-deterministic (TestEncoderArchDeterminism), so one set of
+// goldens serves every CI arch. These three cells are not in that gate's corpus,
+// so the hashes were pinned on amd64 and then confirmed on arm64 (Raspberry
+// Pi 5, go1.26.1, default and noasm builds) before landing. Unlike its two
+// neighbours this test is NOT gated by toolWiringSkipRace: three two-second
+// encodes cost about 0.2 s per lane, so running it in the race and noasm lanes
+// is cross-build coverage for free. An intentional change to the twoloop
 // quantizer or to PNS marking moves these; the failure message prints the
 // observed hash, which is the value to re-pin after confirming the change was
 // meant.
 func TestEncoderPNSDisabledGolden(t *testing.T) {
 	inputs := edgeInputCache{}
 	for _, g := range pnsDisabledGolden {
-		t.Run("twoloop_"+g.cell.name(), func(t *testing.T) {
+		t.Run(coderTwoLoop+"_"+g.cell.name(), func(t *testing.T) {
 			src := inputs.get(g.cell.chLabel(), toolWiringRate, toolWiringFrames)
 			cfg := EncoderConfig{
 				SampleRate: toolWiringRate,
@@ -416,7 +422,9 @@ func TestEncoderPNSDisabledGolden(t *testing.T) {
 			if got != g.sha {
 				t.Errorf("DisablePNS twoloop stream sha256 = %s, want %s: either the "+
 					"non-NMR MarkPNS guard no longer holds CanPNS all-false with PNS off, "+
-					"or the twoloop quantizer changed on purpose (then re-pin)", got, g.sha)
+					"or the twoloop quantizer changed on purpose (then re-pin), or the "+
+					"encoder is not arch-identical here, which TestEncoderArchDeterminism "+
+					"failing alongside would show", got, g.sha)
 			}
 		})
 	}
