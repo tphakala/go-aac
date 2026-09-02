@@ -28,6 +28,16 @@ tasks:
   test:race:
     desc: Run tests with the race detector
     cmds:
+      # Deliberately no -count=1, unlike CI's race steps, where the flag exists
+      # because setup-go restores a GOCACHE from a different run and a cached ok
+      # could satisfy a lane that ran nothing. Locally the cache is
+      # content-addressed, so a hit means this machine really did run these
+      # bytes, and the cost of the flag would be paid on every `task check`
+      # rather than only on a re-run. The counter-argument is real and this is a
+      # judgment call rather than a settled one: a race-detector result is not a
+      # pure function of the input, so caching one does hide a flake that a
+      # re-run might surface. If flake hunting starts to matter more than the
+      # turnaround, add -count=1 here and to test:noasm together.
       - go test -race ./...
 
   test:noasm:

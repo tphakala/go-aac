@@ -259,17 +259,7 @@ func TestEncoderEdgeConfigSoak(t *testing.T) {
 				t.Errorf("average coded rate %d bps exceeds the buffer model ceiling %d bps", got, ceiling)
 			}
 
-			perChannel, pcmS16, channels := decodeAll(t, asc, aus)
-			if channels != c.channels {
-				t.Errorf("decoded %d channels, want %d", channels, c.channels)
-			}
-			// Decoded length is the input plus the encoder's priming delay.
-			if want := samples + EncoderDelay; perChannel != want {
-				t.Errorf("decoded %d samples per channel, want %d", perChannel, want)
-			}
-			if isDigitalSilence(pcmS16) {
-				t.Errorf("decoded output is digital silence over %d frames", frames)
-			}
+			assertDecodable(t, fmt.Sprintf("%d frames", frames), asc, aus, src)
 		})
 	}
 }
@@ -392,22 +382,8 @@ func TestEncoderMidSideWiring(t *testing.T) {
 				}
 
 				// Both variants must remain decodable, not merely different.
-				for _, v := range []struct {
-					label string
-					aus   [][]byte
-					asc   []byte
-				}{{"ms", on, onASC}, {"noms", off, offASC}} {
-					perChannel, pcmS16, channels := decodeAll(t, v.asc, v.aus)
-					if channels != 2 {
-						t.Errorf("%s: decoded %d channels, want 2", v.label, channels)
-					}
-					if want := len(src[0]) + EncoderDelay; perChannel != want {
-						t.Errorf("%s: decoded %d samples per channel, want %d", v.label, perChannel, want)
-					}
-					if isDigitalSilence(pcmS16) {
-						t.Errorf("%s: decoded output is digital silence", v.label)
-					}
-				}
+				assertDecodable(t, "ms", onASC, on, src)
+				assertDecodable(t, "noms", offASC, off, src)
 			})
 		}
 	}

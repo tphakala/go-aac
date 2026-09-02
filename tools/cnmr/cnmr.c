@@ -353,13 +353,22 @@ static void fix_search(const char *name, int bitrate, float noisiness)
 
 /* ---------------- fixture 4: nmr_decide_stereo + stereo search ----------- */
 
-static void fix_stereo(void)
+/* mid_side and intensity_stereo are s->options.mid_side (-1 auto, 0 off) and
+ * s->options.intensity_stereo, the two options nmr_decide_stereo reads
+ * (aacenc.c:731, 769-770, 787). The default fixture pins the defaults; the
+ * two variants pin each option switched off alone, which is every
+ * combination the Go encoder's public Config can reach: it spells only auto
+ * and off, and the C's aac_ms 1 force-all has no Go caller. The encoder skips
+ * the call when both are off (aacenc.c:1216-1217), which is why there is no
+ * fourth fixture. The caller reseeds lcgv before each call so all three
+ * variants see the same synthetic frames. */
+static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
 {
     const int rate = 44100, bitrate = 96000;
     const int sr_idx = 4;
 
-    out = fopen("nmr_stereo.bin", "wb");
-    if (!out) { perror("nmr_stereo.bin"); exit(1); }
+    out = fopen(name, "wb");
+    if (!out) { perror(name); exit(1); }
 
     memset(&nmrst, 0, sizeof(nmrst));
     memset(&cpe, 0, sizeof(cpe));
@@ -368,8 +377,8 @@ static void fix_stereo(void)
     sctx.channels = 2;
     sctx.lambda = 120.0f;
     sctx.options.nmr_speed = 0;
-    sctx.options.mid_side = -1;          /* auto (the default) */
-    sctx.options.intensity_stereo = 1;
+    sctx.options.mid_side = mid_side;
+    sctx.options.intensity_stereo = intensity_stereo;
     sctx.options.pns = 1;
     sctx.last_frame_pb_count = 0;
     actx.bit_rate = bitrate;
@@ -515,7 +524,9 @@ int main(void)
     g_speed = 3;
     lcgv = 0x9b05688c; fix_search("nmr_search_sp3.bin", 96000, 1.2f);
     g_speed = 0;
-    lcgv = 0x6a09e667; fix_stereo();
+    lcgv = 0x6a09e667; fix_stereo("nmr_stereo.bin", -1, 1);
+    lcgv = 0x6a09e667; fix_stereo("nmr_stereo_noms.bin", 0, 1);
+    lcgv = 0x6a09e667; fix_stereo("nmr_stereo_nois.bin", -1, 0);
 
     fprintf(stderr, "cnmr: fixtures written\n");
     return 0;
