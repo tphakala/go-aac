@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	aac "github.com/tphakala/go-aac"
 )
 
 // TestCutoffParityVsC proves the Config.Cutoff plumbing end to end: the
@@ -35,7 +37,7 @@ func TestCutoffParityVsC(t *testing.T) {
 
 	const cutoff = 12000
 	cPath := filepath.Join(dir, "c.adts")
-	cmd := exec.Command(ffmpeg, "-v", "error", "-y", "-f", "f32le",
+	cmd := exec.CommandContext(oracleCtx(t), ffmpeg, "-v", "error", "-y", "-f", "f32le",
 		"-ar", fmt.Sprint(rate), "-ac", "1", "-i", rawPath,
 		"-c:a", "aac", "-cutoff", fmt.Sprint(cutoff), "-b:a", "128000",
 		"-flags", "+bitexact", "-f", "adts", cPath)
@@ -58,8 +60,8 @@ func TestCutoffParityVsC(t *testing.T) {
 	}
 
 	sizeDelta := 100 * (float64(goBuf.Len()) - float64(len(cStream))) / float64(len(cStream))
-	pGo := psnr(src[0], ffmpegDecode(t, ffmpeg, goPath, 1)[0], 1024)
-	pC := psnr(src[0], ffmpegDecode(t, ffmpeg, cPath, 1)[0], 1024)
+	pGo := psnr(src[0], ffmpegDecode(t, ffmpeg, goPath, 1)[0], aac.EncoderDelay)
+	pC := psnr(src[0], ffmpegDecode(t, ffmpeg, cPath, 1)[0], aac.EncoderDelay)
 	t.Logf("cutoff %d: Go %d B %.2f dB, C %d B %.2f dB (size %+.2f%%, PSNR %+.2f dB)",
 		cutoff, goBuf.Len(), pGo, len(cStream), pC, sizeDelta, pGo-pC)
 	if math.Abs(sizeDelta) > 3.0 {

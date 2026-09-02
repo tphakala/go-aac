@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
@@ -65,42 +64,12 @@ func synthTonal(n, rate int) []float32 {
 	return src
 }
 
-// encodeADTS runs the Phase 1 encoder over src and returns an ADTS stream.
+// encodeADTS runs the encoder over mono src and returns an ADTS stream. It is
+// encodeADTSPlanar (phase2_e2e_test.go) with the single channel wrapped, so the
+// feed-frame-and-drain loop lives in one place.
 func encodeADTS(t *testing.T, cfg enc.Config, src []float32) []byte {
 	t.Helper()
-	e, err := enc.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srIdx, ok := sampleRateIndex(cfg.SampleRate)
-	if !ok {
-		t.Fatalf("no samplerate index for %d", cfg.SampleRate)
-	}
-	var stream []byte
-	au := make([]byte, 0, 1536)
-	wrap := func(payload []byte) {
-		if len(payload) == 0 {
-			return
-		}
-		stream = appendADTSHeader(stream, srIdx, 1, len(payload))
-		stream = append(stream, payload...)
-	}
-	for off := 0; off < len(src); off += 1024 {
-		frame := src[off:min(off+1024, len(src))]
-		au, err = e.EncodeFrame(au[:0], [][]float32{frame})
-		if err != nil {
-			t.Fatal(err)
-		}
-		wrap(au)
-	}
-	for !e.Drained() {
-		au, err = e.EncodeFrame(au[:0], nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		wrap(au)
-	}
-	return stream
+	return encodeADTSPlanar(t, cfg, [][]float32{src})
 }
 
 // psnr computes 10*log10(1/MSE) against full-scale 1.0 between src and
@@ -131,19 +100,14 @@ func TestPhase1Gate(t *testing.T) {
 			src := synthTonal(n, rate)
 			stream := encodeADTS(t, enc.Config{SampleRate: rate, Bitrate: 128000, Channels: 1, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true}, src)
 
-			dir := t.TempDir()
-			adts := filepath.Join(dir, "out.adts")
-			if err := os.WriteFile(adts, stream, 0o644); err != nil {
-				t.Fatal(err)
-			}
 			// Mono, so the one decoded channel is the signal; the issue #3
 			// gate demands zero decoder diagnostics at -v error, which
 			// ffmpegDecode enforces.
-			dec := ffmpegDecode(t, ffmpeg, adts, 1)[0]
+			dec := ffmpegDecodeStream(t, ffmpeg, stream, 1)[0]
 			if len(dec) < n {
 				t.Fatalf("decoded %d samples, want >= %d", len(dec), n)
 			}
-			got := psnr(src, dec, 1024)
+			got := psnr(src, dec, EncoderDelay)
 			t.Logf("rate %d: %d bytes ADTS, decoded %d samples, PSNR %.2f dB",
 				rate, len(stream), len(dec), got)
 			if got < 30 {

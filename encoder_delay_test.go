@@ -37,8 +37,9 @@ func delayTestSignal(n, channels int) [][]float32 {
 // needing a particular encoder lifecycle (a fresh one, or one dirtied and then
 // Reset onto the config under test) can arrange that themselves and still share
 // one definition of the access-unit collection and drain contract. That
-// contract lives here alone: if the encoder API moves, this is the only feed
-// loop to update.
+// contract lives here for the collection helpers: if the encoder API moves,
+// this is the feed loop they share (encodeADTSPlanar carries its own, since it
+// also wraps ADTS framing).
 func encodeDrain(t *testing.T, e *Encoder, sig [][]float32) [][]byte {
 	t.Helper()
 	n := len(sig[0])
@@ -110,6 +111,25 @@ func assertDecodable(t *testing.T, label string, asc []byte, aus [][]byte, src [
 	if isDigitalSilence(pcmS16) {
 		t.Errorf("%s: decoded output is digital silence", label)
 	}
+}
+
+// isDigitalSilence reports whether b is a non-empty run of zero bytes, i.e.
+// decoded digital silence. A stream that encodes and decodes cleanly but
+// carries no signal is still an encoder failure, and at the bitrate floor it is
+// the plausible degenerate outcome. Empty input is not silence: a decode that
+// produced nothing at all is caught by the sample-count assertion instead, and
+// reporting it here too would only mislabel it. assertDecodable is its only
+// caller.
+func isDigitalSilence(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeAll decodes every access unit through the raw decoder and returns the

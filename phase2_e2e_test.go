@@ -37,9 +37,9 @@ func encodeADTSPlanar(t *testing.T, cfg enc.Config, src [][]float32) []byte {
 		stream = append(stream, payload...)
 	}
 	frame := make([][]float32, cfg.Channels)
-	for off := 0; off < len(src[0]); off += 1024 {
+	for off := 0; off < len(src[0]); off += FrameSize {
 		for ch := range cfg.Channels {
-			frame[ch] = src[ch][off:min(off+1024, len(src[ch]))]
+			frame[ch] = src[ch][off:min(off+FrameSize, len(src[ch]))]
 		}
 		au, err = e.EncodeFrame(au[:0], frame)
 		if err != nil {
@@ -188,7 +188,7 @@ func TestWindowSequenceVsC(t *testing.T) {
 		name string
 		src  []float32
 	}{
-		{"castanets", synthCastanets(44100*6, 44100, 0x0badcafe, 0)},
+		{"castanets", synthCastanets(44100*6, 44100, castanetsLeftSeed, castanetsLeftClick)},
 		{"tonal", synthTonal(44100*5, 44100)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -270,9 +270,9 @@ func TestWindowSequenceVsC(t *testing.T) {
 // 60.64 dB.
 func TestPhase2DecodeGate(t *testing.T) {
 	ffmpeg := ffmpegBin(t)
-	cast := synthCastanets(44100*6, 44100, 0x0badcafe, 0)
+	cast := synthCastanets(44100*6, 44100, castanetsLeftSeed, castanetsLeftClick)
 	tonal := synthTonal(44100*5, 44100)
-	castR := synthCastanets(44100*5, 44100, 0x5eed1234, 137)
+	castR := synthCastanets(44100*5, 44100, castanetsRightSeed, castanetsRightClick)
 	for _, tc := range []struct {
 		name  string
 		src   [][]float32
@@ -287,16 +287,10 @@ func TestPhase2DecodeGate(t *testing.T) {
 			ch := len(tc.src)
 			stream := encodeADTSPlanar(t,
 				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: ch, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true}, tc.src)
-			dir := t.TempDir()
-			adts := filepath.Join(dir, "out.adts")
-			if err := os.WriteFile(adts, stream, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			dec := ffmpegDecode(t, ffmpeg, adts, ch)
-			const delay = 1024
+			dec := ffmpegDecodeStream(t, ffmpeg, stream, ch)
 			worst := math.Inf(1)
 			for c := range ch {
-				p := psnr(tc.src[c], dec[c], delay)
+				p := psnr(tc.src[c], dec[c], EncoderDelay)
 				t.Logf("%s ch %d PSNR %.2f dB", tc.name, c, p)
 				worst = math.Min(worst, p)
 			}

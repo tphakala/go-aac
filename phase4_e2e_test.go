@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
@@ -110,15 +108,10 @@ func TestPhase4TNSAB(t *testing.T) {
 	run := func(src [][]float32, disableTNS bool) ([]byte, float64) {
 		stream := encodeADTSPlanar(t, enc.Config{SampleRate: 44100,
 			Bitrate: 128000, Channels: 2, DisableTNS: disableTNS}, src)
-		dir := t.TempDir()
-		p := filepath.Join(dir, "ab.adts")
-		if err := os.WriteFile(p, stream, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		dec := ffmpegDecode(t, ffmpeg, p, 2)
+		dec := ffmpegDecodeStream(t, ffmpeg, stream, 2)
 		worst := math.Inf(1)
 		for c := range 2 {
-			worst = math.Min(worst, psnr(src[c], dec[c], 1024))
+			worst = math.Min(worst, psnr(src[c], dec[c], EncoderDelay))
 		}
 		return stream, worst
 	}
@@ -174,20 +167,15 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 			cfg.Channels = 2
 			cfg.Coder = enc.CoderFast
 			stream := encodeADTSPlanar(t, cfg, src)
-			dir := t.TempDir()
-			p := filepath.Join(dir, "fate.adts")
-			if err := os.WriteFile(p, stream, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			dec := ffmpegDecode(t, ffmpeg, p, 2)
+			dec := ffmpegDecodeStream(t, ffmpeg, stream, 2)
 			var err2 float64
 			n := 0
 			for c := range 2 {
-				for i := range len(dec[c]) - 1024 {
+				for i := range len(dec[c]) - EncoderDelay {
 					if i >= len(src[c]) {
 						break
 					}
-					d := float64(src[c][i]) - float64(dec[c][i+1024])
+					d := float64(src[c][i]) - float64(dec[c][i+EncoderDelay])
 					err2 += d * d
 					n++
 				}

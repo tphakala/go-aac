@@ -18,23 +18,17 @@ func synthFrame(n int, phase float64) []float32 {
 
 // encodeConcat feeds twenty generated mono frames through e, drains it and
 // returns the concatenated access units. It is the byte-identity vehicle for
-// the tests that compare two encoders: the frames are a deterministic function
-// of their index, so two encoders fed by it see identical input.
+// the tests that compare two encoders: the input is a deterministic function of
+// sample index, so two encoders fed by it see identical input.
+//
+// The twenty phase-shifted frames are exactly sample indices 0..20479 of one
+// continuous synthFrame(20*FrameSize, 0) render (frame i carries phase
+// i*FrameSize, so its sample j maps to global index i*FrameSize+j), so this
+// routes through encodeDrain (encoder_delay_test.go), the shared feed-and-drain
+// loop the collection helpers reuse.
 func encodeConcat(t *testing.T, e *Encoder) []byte {
 	t.Helper()
-	var out []byte
-	var err error
-	for i := range 20 {
-		if out, err = e.EncodeFrame(out, [][]float32{synthFrame(FrameSize, float64(i*FrameSize))}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for !e.Drained() {
-		if out, err = e.EncodeFrame(out, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return out
+	return bytes.Join(encodeDrain(t, e, [][]float32{synthFrame(20*FrameSize, 0)}), nil)
 }
 
 func TestEncoderConfigValidate(t *testing.T) {

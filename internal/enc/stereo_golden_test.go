@@ -18,19 +18,33 @@ type sfxr struct {
 	off int
 }
 
+// need fails with a diagnostic rather than a raw index panic when the fixture is
+// shorter than the next read wants. sfxr carries a *testing.T for exactly this,
+// the way the internal/coder fixture reader uses its own (nmr_golden_test.go).
+func (f *sfxr) need(n int) {
+	f.t.Helper()
+	if f.off+n > len(f.buf) {
+		f.t.Fatalf("stereo fixture truncated: need %d bytes at offset %d of %d",
+			n, f.off, len(f.buf))
+	}
+}
+
 func (f *sfxr) i32() int32 {
+	f.need(4)
 	v := int32(binary.LittleEndian.Uint32(f.buf[f.off:]))
 	f.off += 4
 	return v
 }
 
 func (f *sfxr) f32() float32 {
+	f.need(4)
 	v := math.Float32frombits(binary.LittleEndian.Uint32(f.buf[f.off:]))
 	f.off += 4
 	return v
 }
 
 func (f *sfxr) u8() uint8 {
+	f.need(1)
 	v := f.buf[f.off]
 	f.off++
 	return v

@@ -379,7 +379,9 @@ static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
     sctx.options.nmr_speed = 0;
     sctx.options.mid_side = mid_side;
     sctx.options.intensity_stereo = intensity_stereo;
-    sctx.options.pns = 1;
+    sctx.options.pns = 1; /* decorative here, kept to mirror the encoder's guard:
+                             mark_pns reads only lambda, bandwidth and psy bands,
+                             so nothing in this harness consumes this field */
     sctx.last_frame_pb_count = 0;
     actx.bit_rate = bitrate;
     actx.sample_rate = rate;
@@ -437,7 +439,13 @@ static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
                 }
                 start += s0->ics.swb_sizes[g];
             }
-            /* right-channel psy from its own coeffs */
+            /* right-channel psy from its own coeffs. Zero the whole band array
+             * first: the loop below fills only [0, num_swb) while the dump reads
+             * all 128 entries. The tail is zero today (long windows only, and
+             * psych[1] is written nowhere else in this program), so this changes
+             * no fixture; it closes the residue gap a short-window variant, which
+             * fills fewer entries than nmr_decide_stereo reads, would open. */
+            memset(psych[1].psy_bands, 0, sizeof(psych[1].psy_bands));
             start = 0;
             for (int g = 0; g < s1->ics.num_swb; g++) {
                 FFPsyBand *b = &psych[1].psy_bands[g];

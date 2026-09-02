@@ -187,6 +187,19 @@ func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
 	return out
 }
 
+// ffmpegDecodeStream writes an in-memory ADTS stream to a temp file and decodes
+// it through ffmpegDecode, so a caller holding bytes rather than a path does not
+// carry the write. Every gate that encodes to memory and then scores the decode
+// reaches the decoder through here.
+func ffmpegDecodeStream(t *testing.T, ffmpeg string, stream []byte, channels int) [][]float32 {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "stream.adts")
+	if err := os.WriteFile(p, stream, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return ffmpegDecode(t, ffmpeg, p, channels)
+}
+
 // writeRawF32 writes planar src as the interleaved raw f32le the C encoder
 // reads with -f f32le -ac <channels>.
 func writeRawF32(t *testing.T, path string, src [][]float32) {
@@ -270,7 +283,7 @@ var (
 // at the line that actually failed.
 //
 //nolint:thelper // this is the gate body for one cell, not an assertion wrapper
-func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []byte, cPath string, b gateBounds) {
+func checkGateVsC(t *testing.T, ffmpeg string, src [][]float32, goStream []byte, cPath string, b gateBounds) {
 	cStream, err := os.ReadFile(cPath)
 	if err != nil {
 		t.Fatal(err)
@@ -289,19 +302,14 @@ func checkGateVsC(t *testing.T, ffmpeg, dir string, src [][]float32, goStream []
 			sizeDelta, b.size)
 	}
 
-	goPath := filepath.Join(dir, "go.adts")
-	if err := os.WriteFile(goPath, goStream, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	const delay = 1024
 	ch := len(src)
 	worstDelta := math.Inf(1)
 	meanDelta := 0.0
-	decG := ffmpegDecode(t, ffmpeg, goPath, ch)
+	decG := ffmpegDecodeStream(t, ffmpeg, goStream, ch)
 	decC := ffmpegDecode(t, ffmpeg, cPath, ch)
 	for c := range ch {
-		pg := psnr(src[c], decG[c], delay)
-		pc := psnr(src[c], decC[c], delay)
+		pg := psnr(src[c], decG[c], EncoderDelay)
+		pc := psnr(src[c], decC[c], EncoderDelay)
 		t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
 			c, pg, pc, pg-pc, sizeDelta)
 		worstDelta = math.Min(worstDelta, pg-pc)
@@ -330,5 +338,5 @@ func gateCellVsC(t *testing.T, ffmpeg string, sig gateSignal, cfg enc.Config, b 
 	cPath := filepath.Join(dir, "c.adts")
 	cEncode(t, ffmpeg, sig.raw, cfg, cPath)
 	goStream := encodeADTSPlanar(t, cfg, sig.src)
-	checkGateVsC(t, ffmpeg, dir, sig.src, goStream, cPath, b)
+	checkGateVsC(t, ffmpeg, sig.src, goStream, cPath, b)
 }
