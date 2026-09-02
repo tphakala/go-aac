@@ -116,14 +116,18 @@ func chLabelFor(channels int) string {
 type edgeCase struct {
 	coderName string
 	coder     Coder
-	chLabel   string
 	channels  int
 	rate      int
 	bitrate   int
 }
 
+// chLabel derives the corpus channel-layout label from the channel count, so a
+// cell cannot carry a label that disagrees with its channels. Mirrors
+// toolWiringCell.chLabel (tool_wiring_test.go) and archCase.chLabel.
+func (c edgeCase) chLabel() string { return chLabelFor(c.channels) }
+
 func (c edgeCase) name() string {
-	return fmt.Sprintf("%s_%s_%d_%d", c.coderName, c.chLabel, c.rate, c.bitrate)
+	return fmt.Sprintf("%s_%s_%d_%d", c.coderName, c.chLabel(), c.rate, c.bitrate)
 }
 
 // edgeCases is the full edge-config cross product: every coder, both channel
@@ -137,12 +141,9 @@ func edgeCases() []edgeCase {
 	cases := make([]edgeCase, 0, len(testCoders)*2*2*len(bitrates))
 	for _, c := range testCoders {
 		for _, rate := range []int{44100, 48000} {
-			for _, ch := range []struct {
-				label string
-				n     int
-			}{{archChanMono, 1}, {archChanStereo, 2}} {
+			for _, ch := range []int{1, 2} {
 				for _, br := range bitrates {
-					cases = append(cases, edgeCase{c.name, c.coder, ch.label, ch.n, rate, br})
+					cases = append(cases, edgeCase{c.name, c.coder, ch, rate, br})
 				}
 			}
 		}
@@ -209,7 +210,7 @@ func TestEncoderEdgeConfigSoak(t *testing.T) {
 	inputs := edgeInputCache{}
 	for _, c := range edgeCases() {
 		t.Run(c.name(), func(t *testing.T) {
-			src := inputs.get(c.chLabel, c.rate, c.rate*seconds/FrameSize)
+			src := inputs.get(c.chLabel(), c.rate, c.rate*seconds/FrameSize)
 			samples := len(src[0])
 			frames := samples / FrameSize
 
@@ -438,22 +439,4 @@ func encodeCollectReset(t *testing.T, cfg EncoderConfig, sig [][]float32) [][]by
 	// encodeCollect (encoder_delay_test.go); only the encoder lifecycle above
 	// is what this helper adds.
 	return encodeDrain(t, e, sig)
-}
-
-// isDigitalSilence reports whether b is a non-empty run of zero bytes, i.e.
-// decoded digital silence. A stream that encodes and decodes cleanly but
-// carries no signal is still an encoder failure, and at the bitrate floor it is
-// the plausible degenerate outcome. Empty input is not silence: a decode that
-// produced nothing at all is caught by the sample-count assertion instead, and
-// reporting it here too would only mislabel it.
-func isDigitalSilence(b []byte) bool {
-	if len(b) == 0 {
-		return false
-	}
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }

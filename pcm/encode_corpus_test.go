@@ -3,6 +3,7 @@ package pcm
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,9 +12,26 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	aac "github.com/tphakala/go-aac"
 )
+
+// oracleTimeout bounds one ffmpeg or afconvert subprocess so a hung oracle
+// surfaces as a named failure rather than the test binary's own ten-minute
+// timeout panic. This mirrors the root package's runOracle bound; the pcm
+// oracles were the bare exec.Command twins it did not cover.
+const oracleTimeout = 2 * time.Minute
+
+// oracleCtx returns a context that expires after oracleTimeout, for bounding an
+// oracle subprocess. The cancel is registered with t.Cleanup so a caller can
+// pass the context straight to exec.CommandContext without carrying a defer.
+func oracleCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), oracleTimeout)
+	t.Cleanup(cancel)
+	return ctx
+}
 
 // ffmpegBin returns the pinned FFmpeg CLI from GOAAC_FFMPEG, skipping the
 // test when it is not set.
@@ -144,7 +162,7 @@ func srcFloats(data []byte, channels, bits int) [][]float32 {
 func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(ffmpeg, "-v", "error", "-i", path, "-f", "f32le", "-c:a", "pcm_f32le", "-")
+	cmd := exec.CommandContext(oracleCtx(t), ffmpeg, "-v", "error", "-i", path, "-f", "f32le", "-c:a", "pcm_f32le", "-")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -281,7 +299,7 @@ func TestBirdNETGoIntegration(t *testing.T) {
 			if _, err := exec.LookPath("afconvert"); err != nil {
 				t.Skip("afconvert not available")
 			}
-			out, err := exec.Command("afconvert", "-f", "WAVE", "-d", "LEI16", aacIn,
+			out, err := exec.CommandContext(oracleCtx(t), "afconvert", "-f", "WAVE", "-d", "LEI16", aacIn,
 				filepath.Join(dir, "apple.wav")).CombinedOutput()
 			if err != nil {
 				t.Fatalf("afconvert rejected the stream: %v\n%s", err, out)

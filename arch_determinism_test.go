@@ -25,11 +25,15 @@ const (
 type archCase struct {
 	coder    string
 	kind     enc.CoderKind
-	chLabel  string
 	channels int
 	rate     int
 	bitrate  int
 }
+
+// chLabel derives the corpus channel-layout label from the channel count, so a
+// cell cannot carry a label that disagrees with its channels. Mirrors
+// toolWiringCell.chLabel (tool_wiring_test.go) and edgeCase.chLabel.
+func (c archCase) chLabel() string { return chLabelFor(c.channels) }
 
 // testCoders is THE coder axis for this package: the determinism gate and its
 // repro diagnostic, the edge-config soak, the mid/side gate and the tool-wiring
@@ -107,12 +111,12 @@ func archCases() []archCase {
 	for _, c := range testCoders {
 		kind := archCoderKind(c.coder)
 		for _, br := range []int{32000, 96000, 128000, 192000, 1000000} {
-			cases = append(cases, archCase{c.name, kind, archChanStereo, 2, 44100, br})
+			cases = append(cases, archCase{c.name, kind, 2, 44100, br})
 		}
 		cases = append(cases,
-			archCase{c.name, kind, archChanMono, 1, 44100, 128000},
-			archCase{c.name, kind, archChanStereo, 2, 48000, 128000},
-			archCase{c.name, kind, archChanMono, 1, 48000, 128000},
+			archCase{c.name, kind, 1, 44100, 128000},
+			archCase{c.name, kind, 2, 48000, 128000},
+			archCase{c.name, kind, 1, 48000, 128000},
 		)
 	}
 	return cases
@@ -121,7 +125,7 @@ func archCases() []archCase {
 // archKey is the golden-map key and subtest name for a case:
 // "<coder>_<mono|stereo>_<rate>_<bitrate>".
 func archKey(c archCase) string {
-	return fmt.Sprintf("%s_%s_%d_%d", c.coder, c.chLabel, c.rate, c.bitrate)
+	return fmt.Sprintf("%s_%s_%d_%d", c.coder, c.chLabel(), c.rate, c.bitrate)
 }
 
 // Channel seeds and click offsets for the castanets corpus. They live here, in
@@ -234,7 +238,7 @@ func TestEncoderArchDeterminism(t *testing.T) {
 			}
 			stream := encodeADTSPlanar(t,
 				enc.Config{SampleRate: c.rate, Bitrate: c.bitrate, Channels: c.channels, Coder: c.kind},
-				archCastanetsInput(c.chLabel, c.rate))
+				archCastanetsInput(c.chLabel(), c.rate))
 			sum := sha256.Sum256(stream)
 			got := hex.EncodeToString(sum[:])
 			if got != want {

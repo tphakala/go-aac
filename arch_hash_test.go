@@ -96,10 +96,10 @@ func TestArchHashCorpus(t *testing.T) {
 	for _, c := range archCases() {
 		stream := encodeADTSPlanar(t,
 			enc.Config{SampleRate: c.rate, Bitrate: c.bitrate, Channels: c.channels, Coder: c.kind},
-			archCastanetsInput(c.chLabel, c.rate))
+			archCastanetsInput(c.chLabel(), c.rate))
 		sum := sha256.Sum256(stream)
 		lines = append(lines, fmt.Sprintf("adts     %-8s %-9s %-6s %5d %6d  %s",
-			c.coder, archSigCastanets, c.chLabel, c.rate, c.bitrate, hex.EncodeToString(sum[:])))
+			c.coder, archSigCastanets, c.chLabel(), c.rate, c.bitrate, hex.EncodeToString(sum[:])))
 	}
 
 	slices.Sort(lines)
