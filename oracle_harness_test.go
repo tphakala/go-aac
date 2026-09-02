@@ -33,6 +33,11 @@ import (
 // later.
 const oracleTimeout = 2 * time.Minute
 
+// cfgMirroredFields is the number of enc.Config fields cEncode and cToolArgs
+// between them carry to the C side. cToolArgs asserts it, so a field added or
+// removed fails there rather than silently going unmirrored.
+const cfgMirroredFields = 11
+
 // runOracle runs ffmpeg with args under oracleTimeout and returns its stdout.
 // Every caller passes -v error, so anything on stderr is a failure. The three
 // ways it can fail are reported apart, because they need different fixes: it
@@ -86,20 +91,25 @@ func cCoderName(kind enc.CoderKind) string {
 // and its C reference are one literal rather than two that a transposed table
 // row could silently unpair. The zero values of the switches are the C
 // defaults (aac_tns 1, aac_pns 1, aac_ms -1 auto, aac_is 1, aacenc.c:1655-1658
-// @ d09d5afc3a), so only a switched-off tool emits an option: aac_ms is a
-// tri-state and aac_is a boolean, and 0 turns each off. The coder is always
+// @ d09d5afc3a), so only a switched-off tool emits an option: all four are
+// declared with the same -1..1 range and differ only in default, and 0 turns
+// each off. The coder is always
 // named, because the Go zero value and the C default (AAC_CODER_NMR,
 // aacenc.c:1651) agree today but nothing else keeps them agreeing. A field
 // with no C mirror is a test-author error, not a silent omission.
 func cToolArgs(t *testing.T, cfg enc.Config) []string {
 	t.Helper()
 	// The doc above promises that a field with no C mirror is a test-author
-	// error rather than a silent omission; this is what enforces it. cEncode
-	// mirrors SampleRate, Bitrate and Channels; the switches below mirror the
-	// rest; StrictBitrate fails loudly just above. A new field lands here.
-	if n := reflect.TypeFor[enc.Config]().NumField(); n != 11 {
-		t.Fatalf("enc.Config has %d fields, cEncode and cToolArgs mirror 11: "+
-			"add the ffmpeg option for the new field (or a t.Fatal for it) and bump this count", n)
+	// error rather than a silent omission. This catches a field ADDED or
+	// REMOVED; a rename, or a removal and an addition in one change, keeps the
+	// count and still needs a reader. cEncode mirrors SampleRate, Bitrate and
+	// Channels; the switches below mirror the rest; StrictBitrate fails loudly
+	// just below. It fires only where an oracle test runs, since ffmpegBin
+	// skips without GOAAC_FFMPEG, so CI reaches it in the oracle job alone.
+	if n := reflect.TypeFor[enc.Config]().NumField(); n != cfgMirroredFields {
+		t.Fatalf("enc.Config has %d fields, cEncode and cToolArgs mirror %d: add the "+
+			"ffmpeg option for the new field (or a t.Fatal for it) and bump the count",
+			n, cfgMirroredFields)
 	}
 	if cfg.StrictBitrate {
 		t.Fatal("cToolArgs: enc.Config.StrictBitrate has no ffmpeg option mirror here")
@@ -152,13 +162,17 @@ func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
 	raw := runOracle(t, ffmpeg, "-v", "error", "-i", path,
 		"-f", "f32le", "-c:a", "pcm_f32le", "-")
 	n := len(raw) / 4 / channels
-	// A decode that produced nothing is not a result to score: psnr would
-	// divide by zero and return NaN, and every bound below is a `<` comparison
-	// that NaN passes. This is the decode-side twin of checkGateVsC's
-	// empty-stream precondition.
-	if n == 0 {
-		t.Fatalf("ffmpeg decoded %s to no samples (%d bytes, %d channels)",
-			path, len(raw), channels)
+	// A decode too short to score is not a result: psnr accumulates nothing
+	// once the priming delay passes the end, divides zero by zero and returns
+	// NaN, and every bound below is a `<` comparison that NaN passes. The
+	// threshold is the delay rather than zero because that is where the
+	// accumulator empties, so a single access unit decoding to exactly
+	// EncoderDelay samples is caught too. This is the decode-side twin of
+	// checkGateVsC's empty-stream precondition.
+	if n <= EncoderDelay {
+		t.Fatalf("ffmpeg decoded %s to %d samples per channel, at or below the "+
+			"%d-sample priming delay, so psnr would return NaN and pass every bound "+
+			"(%d bytes, %d channels)", path, n, EncoderDelay, len(raw), channels)
 	}
 	out := make([][]float32, channels)
 	for c := range out {
@@ -234,9 +248,11 @@ var (
 	// phase3Bounds predate the mean rule: TNS is off on both sides and the
 	// worst channel alone is gated, at the tighter figure. Kept as they were
 	// when the phase 3 gate scored itself, so folding it into checkGateVsC
-	// changed the code and not the contract. The size rule is the same 3% as
-	// Phase 4's, so it takes the same constant; only the PSNR rule differs.
-	phase3Bounds = gateBounds{size: gateSizeBound, mean: math.Inf(-1), worst: -0.5}
+	// changed the code and not the contract. The size figure equals Phase 4's
+	// today but is deliberately its own literal rather than gateSizeBound: the
+	// sentence above promises these numbers stay as they were, and sharing the
+	// constant would let a Phase 4 retune move Phase 3's contract silently.
+	phase3Bounds = gateBounds{size: 3.0, mean: math.Inf(-1), worst: -0.5}
 )
 
 // checkGateVsC scores one Go stream against the C stream produced from the

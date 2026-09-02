@@ -399,11 +399,12 @@ var pnsDisabledGolden = []struct {
 // so the hashes were pinned on amd64 and then confirmed on arm64 (Raspberry
 // Pi 5, go1.26.1, default and noasm builds) before landing. Unlike its two
 // neighbours this test is NOT gated by toolWiringSkipRace: three two-second
-// encodes cost about 0.2 s per lane, so running it in the race and noasm lanes
-// is cross-build coverage for free. An intentional change to the twoloop
-// quantizer or to PNS marking moves these; the failure message prints the
-// observed hash, which is the value to re-pin after confirming the change was
-// meant.
+// encodes cost about 0.2 s without the detector and about 3.5 s with it, cheap
+// enough that the race and noasm lanes are worth the cross-build coverage
+// where the full sweep those neighbours run is not. An intentional change to
+// the twoloop quantizer or to PNS marking moves these; the failure message
+// prints the observed hash, which is the value to re-pin after confirming the
+// change was meant.
 func TestEncoderPNSDisabledGolden(t *testing.T) {
 	inputs := edgeInputCache{}
 	for _, g := range pnsDisabledGolden {

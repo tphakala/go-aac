@@ -358,9 +358,10 @@ static void fix_search(const char *name, int bitrate, float noisiness)
  * (aacenc.c:731, 769-770, 787). The default fixture pins the defaults; the
  * two variants pin each option switched off alone, which is every
  * combination the Go encoder's public Config can reach: it spells only auto
- * and off, and the C's aac_ms 1 force-all has no Go caller. It skips the call
- * when both are off (aacenc.c:1216-1217). The caller reseeds lcgv before each
- * call so all three variants see the same synthetic frames. */
+ * and off, and the C's aac_ms 1 force-all has no Go caller. The encoder skips
+ * the call when both are off (aacenc.c:1216-1217), which is why there is no
+ * fourth fixture. The caller reseeds lcgv before each call so all three
+ * variants see the same synthetic frames. */
 static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
 {
     const int rate = 44100, bitrate = 96000;

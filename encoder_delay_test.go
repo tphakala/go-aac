@@ -94,8 +94,8 @@ func encodeCollect(t *testing.T, cfg EncoderConfig, sig [][]float32) (aus [][]by
 // their streams share (the edge-config soak, the mid/side gate and the
 // tool-wiring gate): the access units decode through the in-repo decoder to the
 // expected channel count and to exactly the input length plus the priming
-// delay, and the result
-// is not digital silence. A gate whose variant stream merely differed, or
+// delay, and the result is not digital silence. A gate whose variant stream
+// merely differed, or
 // merely decoded, would otherwise pass on a broken stream. label prefixes each
 // failure so a caller checking several variants can tell them apart.
 func assertDecodable(t *testing.T, label string, asc []byte, aus [][]byte, src [][]float32) {

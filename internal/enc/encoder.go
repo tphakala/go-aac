@@ -124,8 +124,8 @@ type Encoder struct {
 
 // New returns an encoder for cfg. Mirrors aacenc.c:aac_encode_init for the
 // single SCE or CPE element of the v1 channel maps @ d09d5afc3a: samplerate
-// index lookup, bitrate clamping, lambda default,
-// coding bandwidth computation and psy init.
+// index lookup, bitrate clamping, lambda default, coding bandwidth
+// computation and psy init.
 func New(cfg Config) (*Encoder, error) {
 	e := &Encoder{}
 	if err := e.Reset(cfg); err != nil {

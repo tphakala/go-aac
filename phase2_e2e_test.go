@@ -14,8 +14,9 @@ import (
 )
 
 // encodeADTSPlanar runs the encoder over planar src and returns an ADTS
-// stream (mono or stereo; it is the Go side of every same-settings gate,
-// through gateCellVsC).
+// stream (mono or stereo). It is the Go side of the differential gates: the
+// ones that score through checkGateVsC reach it via gateCellVsC, and
+// TestWindowSequenceVsC below calls it directly.
 func encodeADTSPlanar(t *testing.T, cfg enc.Config, src [][]float32) []byte {
 	t.Helper()
 	e, err := enc.New(cfg)
@@ -192,10 +193,12 @@ func TestWindowSequenceVsC(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := [][]float32{tc.src}
-			// DisableIS is not idle on a mono stream, so it is set here rather
-			// than left to the tools-off intent alone: with intensity stereo on,
-			// the coding bandwidth widens by 15% (aacenc.c:1609-1610, mirrored
-			// in internal/enc/encoder.go), 20000 Hz to 21200 Hz at this rate.
+			// DisableIS is load-bearing here, and only because DisablePNS is set
+			// too: the widening keys on (pns || intensity_stereo), so with either
+			// tool on it applies. It scales frameBr by 1.15, not the bandwidth
+			// (aacenc.c:1609-1610, mirrored in internal/enc/encoder.go), which at
+			// this rate moves the coding bandwidth from 20000 Hz to 21200 Hz, a
+			// 6% widening from a 15% rate. Measured both ways on this config.
 			// cToolArgs carries every switch in cfg to the C side, so the two
 			// encoders cannot disagree about it. DisableMS is left clear because
 			// M/S is a CPE tool: the C stream is byte-identical with and without
