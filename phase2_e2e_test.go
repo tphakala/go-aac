@@ -193,19 +193,23 @@ func TestWindowSequenceVsC(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := [][]float32{tc.src}
-			// DisableIS is not idle on a mono stream, and only because DisablePNS
-			// is set too: the widening keys on (pns || intensity_stereo), so with
-			// either tool on it applies. Both sides move together, since
-			// cToolArgs mirrors the switch, so this gate passes either way; the
-			// switch is set to keep it the tools-off comparison it documents. It scales frameBr by 1.15, not the bandwidth
-			// (aacenc.c:1609-1610, mirrored in internal/enc/encoder.go), which at
-			// this rate moves the coding bandwidth from 20000 Hz to 21200 Hz, a
-			// 6% widening from a 15% rate. Measured both ways on this config.
-			// cToolArgs carries every switch in cfg to the C side, so the two
-			// encoders cannot disagree about it. DisableMS is left clear because
-			// M/S is a CPE tool: the C stream is byte-identical with and without
-			// -aac_ms 0 on this mono input (verified against the pinned build),
-			// so the option would say nothing.
+			// Why DisableIS is set on a mono stream: it is not idle here, and
+			// only because DisablePNS is set too. The bandwidth widening keys on
+			// (pns || intensity_stereo), so leaving either tool on applies it.
+			//
+			// What the widening does: it scales frameBr by 1.15, not the
+			// bandwidth itself (aacenc.c:1609-1610, mirrored in
+			// internal/enc/encoder.go), which at this rate moves the coding
+			// bandwidth from 20000 Hz to 21200 Hz, a 6% widening from a 15% rate.
+			// Measured both ways on this config. The gate would pass either way,
+			// since cToolArgs mirrors every switch in cfg to the C side and both
+			// encoders move together; the switch is set to keep this the
+			// tools-off comparison the doc above describes.
+			//
+			// Why DisableMS stays clear: M/S is a CPE tool, so the C stream is
+			// byte-identical with and without -aac_ms 0 on this mono input
+			// (verified against the pinned build) and the option would say
+			// nothing.
 			cfg := enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1,
 				Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true}
 			cPath := filepath.Join(t.TempDir(), "c.adts")
