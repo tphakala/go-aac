@@ -10,6 +10,21 @@
  * av_force_cpu_flags(0) pins the SCALAR DSP (abs_pow34/quant_bands; the
  * scalar nmr_trellis_step is the only one on arm64 at this pin anyway),
  * matching the Go port's arithmetic exactly.
+ *
+ * Build recipe (Linux/gcc; $FFPIN is the pinned FFmpeg tree, configured and
+ * built so the static libs below exist). The fixtures are byte-reproducible
+ * only with these exact flags, so keep them in sync with the CI oracle build:
+ *
+ *   gcc -std=c17 -fomit-frame-pointer -fPIC -pthread -O3 \
+ *       -fno-math-errno -fno-signed-zeros -w -I"$FFPIN" -o cnmr \
+ *       tools/cnmr/cnmr.c \
+ *       "$FFPIN/libavcodec/libavcodec.a" \
+ *       "$FFPIN/libswresample/libswresample.a" \
+ *       "$FFPIN/libavutil/libavutil.a" -lm -lpthread -lz
+ *
+ * Run it in an empty directory: it writes the eight nmr_*.bin fixtures to the
+ * cwd. The committed copies live under internal/coder/testdata (five) and
+ * internal/enc/testdata (three); a regenerated file must be byte-identical.
  */
 #include "libavutil/internal.h"
 #include "libavutil/cpu.h"
@@ -20,9 +35,17 @@
 
 static FILE *out;
 
-static void put_f32(float v)   { fwrite(&v, 4, 1, out); }
-static void put_i32(int32_t v) { fwrite(&v, 4, 1, out); }
-static void put_u8(uint8_t v)  { fwrite(&v, 1, 1, out); }
+/* A short write silently truncates a fixture, which would surface much later
+ * as an opaque golden mismatch in Go, so fail loudly the moment fwrite reports
+ * fewer than the one element requested. The success path is unchanged, so this
+ * cannot alter fixture bytes. */
+static void put_bytes(const void *p, size_t sz)
+{
+    if (fwrite(p, sz, 1, out) != 1) { perror("fwrite"); exit(1); }
+}
+static void put_f32(float v)   { put_bytes(&v, 4); }
+static void put_i32(int32_t v) { put_bytes(&v, 4); }
+static void put_u8(uint8_t v)  { put_bytes(&v, 1); }
 
 static uint32_t lcgv = 0x1f2e3d4c;
 static uint32_t lcg(void) { lcgv = lcgv * 1664525u + 1013904223u; return lcgv; }
@@ -263,6 +286,45 @@ static void dump_nmr_state(void)
     put_f32(nmrst.run_burst);
 }
 
+/* NMR bandwidth law (aacenc.c:1600-1607). fix_search passes the full frame
+ * bitrate; fix_stereo passes the per-channel half. Both branches and clamps
+ * are reproduced verbatim so either caller lands on the same value it computed
+ * inline before. */
+static int nmr_bandwidth(int frame_br, int rate)
+{
+    static const int rates[] = { 32000, 48000, 64000, 96000, 192000 };
+    static const int bws[]   = { 14000, 15000, 16000, 18000, 20000 };
+    int bw;
+    if (frame_br >= 32000) {
+        int bw_i = 0;
+        for (; bw_i < 3 && frame_br > rates[bw_i + 1]; bw_i++);
+        bw = bws[bw_i] + (int)((int64_t)(bws[bw_i + 1] - bws[bw_i]) *
+                 (frame_br - rates[bw_i]) / (rates[bw_i + 1] - rates[bw_i]));
+        bw = FFMIN3(bw, 22000, rate / 2);
+    } else {
+        bw = FFMAX(3000, AAC_CUTOFF_FROM_BITRATE(frame_br, 1, rate));
+    }
+    return FFMIN(FFMAX(bw, 8000), rate / 2);
+}
+
+/* Side accounting (aacenc.c:1394-1409): fold synthetic side bits into
+ * last_frame_pb_count and update the side-bits EMA. The caller draws the LCG
+ * for side and computes counted (the two differ between the mono and stereo
+ * fixtures), so the draw order is unchanged by factoring the shared update. */
+static void side_account(int counted, int side)
+{
+    sctx.last_frame_pb_count = counted + side;
+    if (counted > 0) {
+        float sd = (float)sctx.last_frame_pb_count - counted;
+        if (nmrst.side_inited) {
+            nmrst.side_ema += 0.125f * (sd - nmrst.side_ema);
+        } else {
+            nmrst.side_ema = sd;
+            nmrst.side_inited = 1;
+        }
+    }
+}
+
 static void fix_search(const char *name, int bitrate, float noisiness)
 {
     SingleChannelElement sce;
@@ -289,23 +351,8 @@ static void fix_search(const char *name, int bitrate, float noisiness)
     actx.global_quality = 0;
     sctx.psy.avctx = &actx;
 
-    /* NMR bandwidth law (aacenc.c:1600-1607) */
-    {
-        int frame_br = bitrate;
-        static const int rates[] = { 32000, 48000, 64000, 96000, 192000 };
-        static const int bws[]   = { 14000, 15000, 16000, 18000, 20000 };
-        if (frame_br >= 32000) {
-            int bw_i = 0;
-            for (; bw_i < 3 && frame_br > rates[bw_i + 1]; bw_i++);
-            sctx.bandwidth = bws[bw_i] + (int)((int64_t)(bws[bw_i + 1] - bws[bw_i]) *
-                                 (frame_br - rates[bw_i]) / (rates[bw_i + 1] - rates[bw_i]));
-            sctx.bandwidth = FFMIN3(sctx.bandwidth, 22000, rate / 2);
-        } else {
-            sctx.bandwidth = FFMAX(3000, AAC_CUTOFF_FROM_BITRATE(frame_br, 1, rate));
-        }
-        sctx.bandwidth = FFMIN(FFMAX(sctx.bandwidth, 8000), rate / 2);
-        put_i32(sctx.bandwidth);
-    }
+    sctx.bandwidth = nmr_bandwidth(bitrate, rate);
+    put_i32(sctx.bandwidth);
 
     int rate_frame = (int)(bitrate * 1024.0 / rate);
     for (int f = 0; f < nframes; f++) {
@@ -325,21 +372,10 @@ static void fix_search(const char *name, int bitrate, float noisiness)
         mark_pns(&sctx, &actx, &sce);
         search_for_quantizers_nmr(&actx, &sctx, &sce, sctx.lambda);
 
-        /* replicate the encoder's side accounting (aacenc.c:1394-1409)
-         * with synthetic side bits */
+        /* replicate the encoder's side accounting with synthetic side bits */
         {
             int side = 120 + (int)(lcg() % 90);
-            int counted = nmrst.counted[0];
-            sctx.last_frame_pb_count = counted + side;
-            if (counted > 0) {
-                float sd = (float)sctx.last_frame_pb_count - counted;
-                if (nmrst.side_inited) {
-                    nmrst.side_ema += 0.125f * (sd - nmrst.side_ema);
-                } else {
-                    nmrst.side_ema = sd;
-                    nmrst.side_inited = 1;
-                }
-            }
+            side_account(nmrst.counted[0], side);
         }
 
         put_i32(f);
@@ -360,8 +396,8 @@ static void fix_search(const char *name, int bitrate, float noisiness)
  * combination the Go encoder's public Config can reach: it spells only auto
  * and off, and the C's aac_ms 1 force-all has no Go caller. The encoder skips
  * the call when both are off (aacenc.c:1216-1217), which is why there is no
- * fourth fixture. The caller reseeds lcgv before each call so all three
- * variants see the same synthetic frames. */
+ * fourth fixture. fix_stereo reseeds lcgv itself so all three variants see
+ * the same synthetic frames regardless of call order. */
 static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
 {
     const int rate = 44100, bitrate = 96000;
@@ -370,12 +406,19 @@ static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
     out = fopen(name, "wb");
     if (!out) { perror(name); exit(1); }
 
+    /* Own the seed so all three variants see the same synthetic frames
+     * regardless of call order. */
+    lcgv = 0x6a09e667;
+
     memset(&nmrst, 0, sizeof(nmrst));
     memset(&cpe, 0, sizeof(cpe));
     sctx.nmr = &nmrst;
     sctx.psy.ch = psych;
     sctx.channels = 2;
     sctx.lambda = 120.0f;
+    /* Make the option state a function of this call's arguments alone, rather
+     * than of whatever a prior fixture left in the shared static context. */
+    memset(&sctx.options, 0, sizeof(sctx.options));
     sctx.options.nmr_speed = 0;
     sctx.options.mid_side = mid_side;
     sctx.options.intensity_stereo = intensity_stereo;
@@ -390,19 +433,8 @@ static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
     actx.flags = 0;
     actx.global_quality = 0;
     sctx.psy.avctx = &actx;
-    sctx.bandwidth = 15500; /* 48 kbps/ch via the NMR law: computed below */
-    {
-        int frame_br = bitrate / 2;
-        static const int rates[] = { 32000, 48000, 64000, 96000, 192000 };
-        static const int bws[]   = { 14000, 15000, 16000, 18000, 20000 };
-        int bw_i = 0;
-        for (; bw_i < 3 && frame_br > rates[bw_i + 1]; bw_i++);
-        sctx.bandwidth = bws[bw_i] + (int)((int64_t)(bws[bw_i + 1] - bws[bw_i]) *
-                             (frame_br - rates[bw_i]) / (rates[bw_i + 1] - rates[bw_i]));
-        sctx.bandwidth = FFMIN3(sctx.bandwidth, 22000, rate / 2);
-        sctx.bandwidth = FFMIN(FFMAX(sctx.bandwidth, 8000), rate / 2);
-        put_i32(sctx.bandwidth);
-    }
+    sctx.bandwidth = nmr_bandwidth(bitrate / 2, rate); /* per-channel half */
+    put_i32(sctx.bandwidth);
 
     int rate_frame = (int)(bitrate * 1024.0 / rate);
     for (int f = 0; f < 8; f++) {
@@ -500,17 +532,7 @@ static void fix_stereo(const char *name, int mid_side, int intensity_stereo)
 
         { /* side accounting with synthetic side bits, both channels */
             int side = 260 + (int)(lcg() % 120);
-            int counted = nmrst.counted[0] + nmrst.counted[1];
-            sctx.last_frame_pb_count = counted + side;
-            if (counted > 0) {
-                float sd = (float)sctx.last_frame_pb_count - counted;
-                if (nmrst.side_inited) {
-                    nmrst.side_ema += 0.125f * (sd - nmrst.side_ema);
-                } else {
-                    nmrst.side_ema = sd;
-                    nmrst.side_inited = 1;
-                }
-            }
+            side_account(nmrst.counted[0] + nmrst.counted[1], side);
             put_i32(sctx.last_frame_pb_count);
         }
     }
@@ -532,9 +554,9 @@ int main(void)
     g_speed = 3;
     lcgv = 0x9b05688c; fix_search("nmr_search_sp3.bin", 96000, 1.2f);
     g_speed = 0;
-    lcgv = 0x6a09e667; fix_stereo("nmr_stereo.bin", -1, 1);
-    lcgv = 0x6a09e667; fix_stereo("nmr_stereo_noms.bin", 0, 1);
-    lcgv = 0x6a09e667; fix_stereo("nmr_stereo_nois.bin", -1, 0);
+    fix_stereo("nmr_stereo.bin", -1, 1);
+    fix_stereo("nmr_stereo_noms.bin", 0, 1);
+    fix_stereo("nmr_stereo_nois.bin", -1, 0);
 
     fprintf(stderr, "cnmr: fixtures written\n");
     return 0;
