@@ -3,10 +3,8 @@
 package aac
 
 import (
-	"encoding/binary"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -16,7 +14,9 @@ import (
 )
 
 // encodeADTSPlanar runs the encoder over planar src and returns an ADTS
-// stream (Phase 2: mono or stereo).
+// stream (mono or stereo). It is the Go side of the differential gates: the
+// ones that score through checkGateVsC reach it via gateCellVsC, and
+// TestWindowSequenceVsC below calls it directly.
 func encodeADTSPlanar(t *testing.T, cfg enc.Config, src [][]float32) []byte {
 	t.Helper()
 	e, err := enc.New(cfg)
@@ -192,35 +192,33 @@ func TestWindowSequenceVsC(t *testing.T) {
 		{"tonal", synthTonal(44100*5, 44100)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			rawPath := filepath.Join(dir, "src.f32")
-			raw := make([]byte, 4*len(tc.src))
-			for i, v := range tc.src {
-				binary.LittleEndian.PutUint32(raw[4*i:], math.Float32bits(v))
-			}
-			if err := os.WriteFile(rawPath, raw, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			cPath := filepath.Join(dir, "c.adts")
-			cmd := exec.Command(ffmpeg, "-v", "error", "-f", "f32le", "-ar", "44100",
-				"-ac", "1", "-i", rawPath, "-c:a", "aac", "-aac_coder", "fast",
-				"-aac_tns", "0", "-aac_pns", "0", "-aac_is", "0", "-aac_ms", "0",
-				"-b:a", "128k", "-flags", "+bitexact", "-f", "adts", cPath, "-y")
-			if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
-				t.Fatalf("C encode: %v %q", err, out)
-			}
+			src := [][]float32{tc.src}
+			// Why DisableIS is set on a mono stream: it is not idle here, and
+			// only because DisablePNS is set too. The bandwidth widening keys on
+			// (pns || intensity_stereo), so leaving either tool on applies it.
+			//
+			// What the widening does: it scales frameBr by 1.15, not the
+			// bandwidth itself (aacenc.c:1609-1610, mirrored in
+			// internal/enc/encoder.go), which at this rate moves the coding
+			// bandwidth from 20000 Hz to 21200 Hz, a 6% widening from a 15% rate.
+			// Measured both ways on this config. The gate would pass either way,
+			// since cToolArgs mirrors every switch in cfg to the C side and both
+			// encoders move together; the switch is set to keep this the
+			// tools-off comparison the doc above describes.
+			//
+			// Why DisableMS stays clear: M/S is a CPE tool, so the C stream is
+			// byte-identical with and without -aac_ms 0 on this mono input
+			// (verified against the pinned build) and the option would say
+			// nothing.
+			cfg := enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1,
+				Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true}
+			cPath := filepath.Join(t.TempDir(), "c.adts")
+			cEncode(t, ffmpeg, rawF32Path(t, src), cfg, cPath)
 			cStream, err := os.ReadFile(cPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// DisableIS mirrors the -aac_is 0 above. It is not idle: with
-			// intensity stereo left on, the coding bandwidth widens by 15%
-			// (aacenc.c:1609-1610), so the two sides would code to 21200 Hz
-			// and 20000 Hz and this would stop being a same-settings
-			// comparison.
-			goStream := encodeADTSPlanar(t,
-				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: 1, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true, DisableIS: true},
-				[][]float32{tc.src})
+			goStream := encodeADTSPlanar(t, cfg, src)
 
 			goSeq := windowSeqSCE(t, adtsFrames(t, goStream))
 			cSeq := windowSeqSCE(t, adtsFrames(t, cStream))
@@ -294,15 +292,11 @@ func TestPhase2DecodeGate(t *testing.T) {
 			if err := os.WriteFile(adts, stream, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			dec := ffmpegDecode(t, ffmpeg, adts) // interleaved for stereo
+			dec := ffmpegDecode(t, ffmpeg, adts, ch)
 			const delay = 1024
 			worst := math.Inf(1)
 			for c := range ch {
-				dc := make([]float32, len(dec)/ch)
-				for i := range dc {
-					dc[i] = dec[i*ch+c]
-				}
-				p := psnr(tc.src[c], dc, delay)
+				p := psnr(tc.src[c], dec[c], delay)
 				t.Logf("%s ch %d PSNR %.2f dB", tc.name, c, p)
 				worst = math.Min(worst, p)
 			}

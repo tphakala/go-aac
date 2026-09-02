@@ -90,12 +90,45 @@ func stereoSynthLong(lcg *stereoLCG, sce *coder.SingleChannelElement,
 	}
 }
 
-// The complexity waiver covers a sequential dump-format walk; splitting it
-// would obscure the record layout being verified.
-//
-//nolint:gocognit,gocyclo // sequential fixture-format walk, see above
+// TestNMRDecideStereoAgainstC walks the cnmr.c stereo fixtures: the option
+// defaults, then each stereo option switched off alone. Those are all the
+// combinations the public EncoderConfig can reach: it spells mid/side only as
+// auto or off, and the encoder skips nmrDecideStereo when both are off (the
+// guard at the call site, aacenc.c:1216-1217), which is why there is no
+// "neither" fixture. Until issue #92 only the defaults were reachable, so only
+// they were pinned; the switched-off paths were covered end to end
+// (TestPhase4NMRStereoSwitchesVsC) and oracle-free (TestNMRStereoGuardWiring)
+// but had no per-function vector (issue #97). The three fixtures share one
+// synthetic input, so a mismatch between them is the option alone.
 func TestNMRDecideStereoAgainstC(t *testing.T) {
-	buf, err := os.ReadFile("testdata/nmr_stereo.bin")
+	for _, tc := range []struct {
+		name            string
+		fixture         string
+		midSide         int
+		intensityStereo bool
+	}{
+		{"defaults", "testdata/nmr_stereo.bin", -1, true},
+		{"noms", "testdata/nmr_stereo_noms.bin", 0, true},
+		{"nois", "testdata/nmr_stereo_nois.bin", -1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkNMRStereoFixture(t, tc.fixture, tc.midSide, tc.intensityStereo)
+		})
+	}
+}
+
+// checkNMRStereoFixture drives nmrDecideStereo and the NMR search over the
+// synthetic frames one cnmr.c stereo fixture was dumped from, with the two
+// stereo options it was dumped with, and compares every recorded field.
+//
+// The complexity waiver covers a sequential dump-format walk; splitting it
+// would obscure the record layout being verified. It is not a t.Helper(): it
+// is the test body for one fixture, and the line that failed is the location
+// worth reporting.
+//
+//nolint:gocognit,gocyclo,thelper // sequential fixture-format walk, see above
+func checkNMRStereoFixture(t *testing.T, fixture string, midSide int, intensityStereo bool) {
+	buf, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("fixture: %v", err)
 	}
@@ -195,7 +228,7 @@ func TestNMRDecideStereoAgainstC(t *testing.T) {
 
 		nmrDecideStereo(stereoInput{
 			sampleRate: rate, bitRate: bitrate, channels: 2,
-			midSide: -1, intensityStereo: true,
+			midSide: midSide, intensityStereo: intensityStereo,
 			rcFill: st.RCFill, haveNMR: true,
 		}, &cpe, &psy[0], &psy[1])
 

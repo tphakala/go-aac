@@ -16,6 +16,27 @@ func synthFrame(n int, phase float64) []float32 {
 	return out
 }
 
+// encodeConcat feeds twenty generated mono frames through e, drains it and
+// returns the concatenated access units. It is the byte-identity vehicle for
+// the tests that compare two encoders: the frames are a deterministic function
+// of their index, so two encoders fed by it see identical input.
+func encodeConcat(t *testing.T, e *Encoder) []byte {
+	t.Helper()
+	var out []byte
+	var err error
+	for i := range 20 {
+		if out, err = e.EncodeFrame(out, [][]float32{synthFrame(FrameSize, float64(i*FrameSize))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for !e.Drained() {
+		if out, err = e.EncodeFrame(out, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
+}
+
 func TestEncoderConfigValidate(t *testing.T) {
 	if _, err := NewEncoder(EncoderConfig{SampleRate: 48000, Channels: 1}); err != nil {
 		t.Fatalf("minimal valid config rejected: %v", err)
@@ -143,27 +164,11 @@ func TestAppendADTSHeaderPublic(t *testing.T) {
 // indistinguishable from a fresh NewEncoder.
 func TestEncoderResetByteIdentity(t *testing.T) {
 	cfg := EncoderConfig{SampleRate: 44100, Channels: 1, Bitrate: 128000, Coder: CoderTwoLoop}
-	encode := func(e *Encoder) []byte {
-		var out []byte
-		var err error
-		for i := range 20 {
-			out, err = e.EncodeFrame(out, [][]float32{synthFrame(FrameSize, float64(i*FrameSize))})
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		for !e.Drained() {
-			if out, err = e.EncodeFrame(out, nil); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return out
-	}
 	fresh, err := NewEncoder(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := encode(fresh)
+	want := encodeConcat(t, fresh)
 
 	reused, err := NewEncoder(EncoderConfig{SampleRate: 48000, Channels: 2, Bitrate: 96000})
 	if err != nil {
@@ -185,7 +190,7 @@ func TestEncoderResetByteIdentity(t *testing.T) {
 	if err := reused.Reset(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := encode(reused); !bytes.Equal(got, want) {
+	if got := encodeConcat(t, reused); !bytes.Equal(got, want) {
 		t.Fatalf("Reset encoder differs from fresh (%d vs %d bytes)", len(got), len(want))
 	}
 }
@@ -201,18 +206,7 @@ func TestDefaultBitrateIsTheZeroValueTarget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out []byte
-		for i := range 20 {
-			if out, err = e.EncodeFrame(out, [][]float32{synthFrame(FrameSize, float64(i*FrameSize))}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		for !e.Drained() {
-			if out, err = e.EncodeFrame(out, nil); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return out
+		return encodeConcat(t, e)
 	}
 	implicit, explicit := encode(0), encode(DefaultBitrate)
 	if !bytes.Equal(implicit, explicit) {

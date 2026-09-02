@@ -3,12 +3,9 @@
 package aac
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -106,30 +103,6 @@ func encodeADTS(t *testing.T, cfg enc.Config, src []float32) []byte {
 	return stream
 }
 
-// ffmpegDecode decodes an ADTS file to raw mono f32le via the pinned ffmpeg
-// and fails the test on any decoder diagnostic (the issue #3 gate demands
-// zero errors at -v error).
-func ffmpegDecode(t *testing.T, ffmpeg, path string) []float32 {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.Command(ffmpeg, "-v", "error", "-i", path,
-		"-f", "f32le", "-c:a", "pcm_f32le", "-")
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("ffmpeg decode failed: %v\n%s", err, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Fatalf("ffmpeg -v error reported diagnostics:\n%s", stderr.String())
-	}
-	raw := stdout.Bytes()
-	pcm := make([]float32, len(raw)/4)
-	for i := range pcm {
-		pcm[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[4*i:]))
-	}
-	return pcm
-}
-
 // psnr computes 10*log10(1/MSE) against full-scale 1.0 between src and
 // dec[delay:], the documented Phase 1 PSNR definition.
 func psnr(src, dec []float32, delay int) float64 {
@@ -163,7 +136,10 @@ func TestPhase1Gate(t *testing.T) {
 			if err := os.WriteFile(adts, stream, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			dec := ffmpegDecode(t, ffmpeg, adts)
+			// Mono, so the one decoded channel is the signal; the issue #3
+			// gate demands zero decoder diagnostics at -v error, which
+			// ffmpegDecode enforces.
+			dec := ffmpegDecode(t, ffmpeg, adts, 1)[0]
 			if len(dec) < n {
 				t.Fatalf("decoded %d samples, want >= %d", len(dec), n)
 			}

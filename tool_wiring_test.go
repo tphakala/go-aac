@@ -4,6 +4,8 @@ package aac
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"testing"
@@ -49,15 +51,22 @@ const toolWiringRate = 44100
 // so the length is fixed here instead.
 const toolWiringSeconds = 2
 
-// toolWiringCell is one (channel layout, bitrate) point of a gate's sweep.
+// toolWiringFrames is toolWiringSeconds in whole frames, the unit
+// edgeInputCache is keyed on.
+const toolWiringFrames = toolWiringRate * toolWiringSeconds / FrameSize
+
+// toolWiringCell is one (channel layout, bitrate) point of a gate's sweep. The
+// layout is carried as the channel count alone; the corpus label is derived
+// from it, so the two cannot disagree.
 type toolWiringCell struct {
-	chLabel  string
 	channels int
 	bitrate  int
 }
 
+func (c toolWiringCell) chLabel() string { return chLabelFor(c.channels) }
+
 func (c toolWiringCell) name() string {
-	return fmt.Sprintf("%s_%d", c.chLabel, c.bitrate)
+	return fmt.Sprintf("%s_%d", c.chLabel(), c.bitrate)
 }
 
 // Cells are chosen per tool rather than shared, because the tools do not all
@@ -71,7 +80,7 @@ var (
 	// enough: DisableTNS is read once into useTNS and gates both arms, and the
 	// arms are selected by coder, which the coder axis already sweeps, not by
 	// channel layout.
-	tnsCells = []toolWiringCell{{archChanStereo, 2, edgeBitrateMid}}
+	tnsCells = []toolWiringCell{{2, edgeBitrateMid}}
 
 	// PNS needs BOTH layouts, because the NMR arm reaches MarkPNS through two
 	// separate guards, one on chans == 1 and one on chans == 2. Testing a single
@@ -80,8 +89,8 @@ var (
 	// 0 bands at 96k, 128k and 192k) and fires well below it (121 bands at the
 	// 32 kb/s point used here).
 	pnsCells = []toolWiringCell{
-		{archChanMono, 1, edgeBitrateLow},
-		{archChanStereo, 2, edgeBitrateMid},
+		{1, edgeBitrateLow},
+		{2, edgeBitrateMid},
 	}
 
 	// Intensity stereo is a CPE tool, so both cells are stereo. Both bitrates
@@ -89,8 +98,8 @@ var (
 	// fast reaches only 3 bands, and at 128 kb/s twoloop reaches only 9. Their
 	// sum is what makes the precondition robust.
 	isCells = []toolWiringCell{
-		{archChanStereo, 2, edgeBitrateLow},
-		{archChanStereo, 2, edgeBitrateMid},
+		{2, edgeBitrateLow},
+		{2, edgeBitrateMid},
 	}
 )
 
@@ -156,24 +165,6 @@ var toolGates = []toolGate{
 	},
 }
 
-// assertDecodable checks that a variant is not merely different but still a
-// well-formed stream carrying signal, the same three checks
-// TestEncoderMidSideWiring makes. A tool switch that produced an undecodable or
-// silent stream would otherwise satisfy every counter assertion here.
-func assertDecodable(t *testing.T, label string, asc []byte, aus [][]byte, src [][]float32) {
-	t.Helper()
-	perChannel, pcmS16, channels := decodeAll(t, asc, aus)
-	if channels != len(src) {
-		t.Errorf("%s: decoded %d channels, want %d", label, channels, len(src))
-	}
-	if want := len(src[0]) + EncoderDelay; perChannel != want {
-		t.Errorf("%s: decoded %d samples per channel, want %d", label, perChannel, want)
-	}
-	if isDigitalSilence(pcmS16) {
-		t.Errorf("%s: decoded output is digital silence", label)
-	}
-}
-
 // checkToolWiringCell encodes one cell twice, once with the gate's switch clear
 // and once with it set, and makes every per-cell assertion. It returns the
 // counter observed with the switch CLEAR so the caller can fold it into the
@@ -183,7 +174,7 @@ func assertDecodable(t *testing.T, label string, asc []byte, aus [][]byte, src [
 // stays a plain three-level sweep; the assertions below are the substance and
 // they read better away from the loop bookkeeping.
 //
-// gate is taken by pointer only to avoid copying the 88-byte struct (gocritic
+// gate is taken by pointer only to avoid copying the 80-byte struct (gocritic
 // hugeParam), matching statsFromInternal in stats.go; the callee never mutates
 // it.
 //
@@ -258,6 +249,7 @@ func TestEncoderToolWiring(t *testing.T) {
 		t.Skip("skipped under -race: single-goroutine and build-independent, and too " +
 			"costly to repeat across six race lanes; see edge_soak_race_test.go")
 	}
+	inputs := edgeInputCache{}
 	for _, gate := range toolGates {
 		t.Run(gate.name, func(t *testing.T) {
 			// Without this a gate declared with no cells runs no subtests, the
@@ -280,7 +272,7 @@ func TestEncoderToolWiring(t *testing.T) {
 					var usedWithTool int64
 					ran, allPassed := 0, true
 					for _, cell := range gate.cells {
-						src := edgeSoakInput(cell.chLabel, toolWiringRate, toolWiringSeconds)
+						src := inputs.get(cell.chLabel(), toolWiringRate, toolWiringFrames)
 						ok := t.Run(cell.name(), func(t *testing.T) {
 							usedWithTool += checkToolWiringCell(t, &gate, tc.coder, cell, src)
 							ran++
@@ -364,5 +356,77 @@ func TestNMRStereoGuardWiring(t *testing.T) {
 			"skipping nmrDecideStereo's PNS-stereo reservation when both stereo tools are "+
 			"off, so the term may have been deleted (issue #92)",
 			bothStats.PNSBands, msStats.PNSBands)
+	}
+}
+
+// pnsGoldenMidLowBitrate is the 64 kb/s point of the issue #93 reproduction.
+// It is not on the edge-config bitrate axis, which has no in-range point
+// between edgeBitrateLow and edgeBitrateMid, so it is named here rather
+// than there.
+const pnsGoldenMidLowBitrate = 64_000
+
+// pnsDisabledGolden pins the DisablePNS stream for the cells where the
+// non-NMR MarkPNS guard (internal/enc/encoder.go) is load-bearing. The pns
+// gate above cannot see that guard: its counter assertion stays at zero under
+// the mutant because SearchForPNS, gated separately, is what sets NoiseBT, and
+// its byte assertion only requires the two directions to differ, which they
+// still do under the mutant. Only pinning the switch-set side closes it
+// (issue #97).
+//
+// The cells are the three that the reproduction on issue #93 showed move when
+// the guard's DisablePNS term is removed (2 s castanets at 44100 Hz, the same
+// input the gate above uses): mono twoloop 32 kb/s (7664 to 7660 bytes),
+// stereo twoloop 32 kb/s (same size, content differs) and stereo twoloop
+// 64 kb/s (16991 to 17000 bytes). Every CoderFast cell and both coders at
+// 128 kb/s were byte-identical under the mutant, so pinning them would add
+// maintenance without adding coverage.
+//
+// Verified 2026-09-01 by applying that mutant: all three cells fail here
+// while the pns gate above stays green.
+var pnsDisabledGolden = []struct {
+	cell toolWiringCell
+	sha  string
+}{
+	{toolWiringCell{1, edgeBitrateLow}, "0db4b9e34b02a29aa361827080d4fbf4d0ebf7c533f030acb7537f443fdf9384"},
+	{toolWiringCell{2, edgeBitrateLow}, "3c0fe680d4aaf99159b2c34951f2a3410d2488d6e4c3da372b73a998f11cb03c"},
+	{toolWiringCell{2, pnsGoldenMidLowBitrate}, "d889f14447100d430385aae6b9e8e16a363b2d56568ba5b37ece4231f3702d79"},
+}
+
+// TestEncoderPNSDisabledGolden asserts the SHA-256 of the concatenated access
+// units for each cell in pnsDisabledGolden, CoderTwoLoop with DisablePNS set.
+// The encoder is arch-deterministic (TestEncoderArchDeterminism), so one set of
+// goldens serves every CI arch. These three cells are not in that gate's corpus,
+// so the hashes were pinned on amd64 and then confirmed on arm64 (Raspberry
+// Pi 5, go1.26.1, default and noasm builds) before landing. Unlike its two
+// neighbours this test is NOT gated by toolWiringSkipRace: three two-second
+// encodes cost about 0.2 s without the detector and about 3.5 s with it, cheap
+// enough that the race and noasm lanes are worth the cross-build coverage
+// where the full sweep those neighbours run is not. An intentional change to
+// the twoloop quantizer or to PNS marking moves these; the failure message
+// prints the observed hash, which is the value to re-pin after confirming the
+// change was meant.
+func TestEncoderPNSDisabledGolden(t *testing.T) {
+	inputs := edgeInputCache{}
+	for _, g := range pnsDisabledGolden {
+		t.Run(coderTwoLoop+"_"+g.cell.name(), func(t *testing.T) {
+			src := inputs.get(g.cell.chLabel(), toolWiringRate, toolWiringFrames)
+			cfg := EncoderConfig{
+				SampleRate: toolWiringRate,
+				Channels:   g.cell.channels,
+				Bitrate:    g.cell.bitrate,
+				Coder:      CoderTwoLoop,
+				DisablePNS: true,
+			}
+			aus, _ := encodeCollect(t, cfg, src)
+			sum := sha256.Sum256(bytes.Join(aus, nil))
+			got := hex.EncodeToString(sum[:])
+			if got != g.sha {
+				t.Errorf("DisablePNS twoloop stream sha256 = %s, want %s: either the "+
+					"non-NMR MarkPNS guard no longer holds CanPNS all-false with PNS off, "+
+					"or the twoloop quantizer changed on purpose (then re-pin), or the "+
+					"encoder is not arch-identical here, which TestEncoderArchDeterminism "+
+					"failing alongside would show", got, g.sha)
+			}
+		})
 	}
 }
