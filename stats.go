@@ -14,17 +14,23 @@ import (
 // @ d09d5afc3a); this library never logs, so the report is exposed as data
 // instead. All counters reset on Encoder.Reset.
 type Stats struct {
-	Frames         int64   // access units produced
-	ChannelFrames  int64   // coded channel-frames (Frames x channels)
-	ShortFrames    int64   // channel-frames coded with eight short windows
-	TNSLongFrames  int64   // TNS-active channel-frames among long blocks
-	TNSShortFrames int64   // TNS-active channel-frames among short blocks
-	Bands          int64   // coded channel-bands
-	PNSBands       int64   // of which perceptual noise substitution
-	PairBands      int64   // coded channel-pair bands (stereo only)
-	MSBands        int64   // of which mid/side coded
-	ISBands        int64   // of which intensity coded
-	MeanLambda     float64 // mean per-frame operating lambda (the C's Qavg)
+	Frames         int64 // access units produced
+	ChannelFrames  int64 // coded channel-frames (Frames x channels)
+	ShortFrames    int64 // channel-frames coded with eight short windows
+	TNSLongFrames  int64 // TNS-active channel-frames among long blocks
+	TNSShortFrames int64 // TNS-active channel-frames among short blocks
+	Bands          int64 // coded channel-bands
+	PNSBands       int64 // of which perceptual noise substitution
+	PairBands      int64 // coded channel-pair bands (stereo only)
+	// MSBands counts channel-pair bands whose ms_used flag is set in the
+	// bitstream (stereo only). On CoderTwoLoop and CoderFast, SearchForIS
+	// also sets ms_used to signal intensity-stereo phase across alternating
+	// bands (internal/coder/stereo_tools.go), so this can be non-zero even
+	// when DisableMS is set. It is not a DisableMS verifier on those coders;
+	// only CoderNMR's mid/side search contributes exclusively to it.
+	MSBands    int64
+	ISBands    int64   // of which intensity coded
+	MeanLambda float64 // mean per-frame operating lambda (the C's Qavg)
 }
 
 // String formats the stats like the report FFmpeg's encoder logs at uninit

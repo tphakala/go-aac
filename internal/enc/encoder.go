@@ -3,10 +3,11 @@
 // Package enc implements the AAC encoder frame pipeline: input buffering,
 // window switching, MDCT, psychoacoustic analysis, rate control and
 // raw_data_block bitstream writing. Mirrors libavcodec/aacenc.c
-// @ d09d5afc3a, restricted to Phase 2 scope: mono SCE or stereo CPE, the
-// full LAME window decision and 3GPP psy model, the fast coder, no
-// TNS/PNS/MS/IS. The package emits raw AAC access units; ADTS framing is
-// applied by the caller (the root package owns the ADTS writer).
+// @ d09d5afc3a, covering mono SCE and stereo CPE, the LAME window
+// decision and 3GPP psy model, all three quantizer coders (NMR, twoloop,
+// fast), and the TNS, PNS, M/S, and I/S tools. The package emits raw AAC
+// access units; ADTS framing is applied by the caller (the root package
+// owns the ADTS writer).
 package enc
 
 import (
@@ -108,9 +109,9 @@ type Encoder struct {
 	pb       *bits.Writer
 	pbBuf    []byte
 	// Per-frame tool activity flags for the coeffs restore in the rate
-	// loop (aacenc.c:1337-1345); all tools are off in Phase 2 so these
-	// stay zero, but the restore seam is wired now
-	// (docs/porting-guide.md pitfall 2).
+	// loop (aacenc.c:1337-1345); set by the I/S, M/S, TNS, and
+	// prediction searches when a tool modified the coefficients, which
+	// triggers the restore from PCoeffs (docs/porting-guide.md pitfall 2).
 	isMode, msMode, tnsMode, predMode int
 	trace                             []string // tool-call ordering trace; nil (and dead) outside tests
 	stats                             Stats    // tool-usage counters (aacenc.h:232-239)
@@ -885,8 +886,8 @@ func (e *Encoder) encodeFrameRateLoop(chans int) {
 				return
 			}
 			// Restore coeffs from pcoeffs when tools modified them
-			// (aacenc.c:1337-1345); no tool is active in Phase 2 so the
-			// flags stay zero, but the seam is the C's.
+			// (aacenc.c:1337-1345); runs when isMode, msMode, tnsMode,
+			// or predMode was set by a tool search this frame.
 			if e.isMode != 0 || e.msMode != 0 || e.tnsMode != 0 || e.predMode != 0 {
 				for ch := range chans {
 					cpe.Ch[ch].Coeffs = cpe.Ch[ch].PCoeffs
