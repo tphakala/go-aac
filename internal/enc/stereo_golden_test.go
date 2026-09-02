@@ -98,9 +98,8 @@ func stereoSynthLong(lcg *stereoLCG, sce *coder.SingleChannelElement,
 // "neither" fixture. Until issue #92 only the defaults were reachable, so only
 // they were pinned; the switched-off paths were covered end to end
 // (TestPhase4NMRStereoSwitchesVsC) and oracle-free (TestNMRStereoGuardWiring)
-// but had no per-function vector (issue #97). The
-// three fixtures share one synthetic input, so a mismatch between them is
-// the option alone.
+// but had no per-function vector (issue #97). The three fixtures share one
+// synthetic input, so a mismatch between them is the option alone.
 func TestNMRDecideStereoAgainstC(t *testing.T) {
 	for _, tc := range []struct {
 		name            string

@@ -33,9 +33,10 @@ import (
 // later.
 const oracleTimeout = 2 * time.Minute
 
-// cfgMirroredFields is the number of enc.Config fields cEncode and cToolArgs
-// between them carry to the C side. cToolArgs asserts it, so a field added or
-// removed fails there rather than silently going unmirrored.
+// cfgMirroredFields is enc.Config's field count, every one of which cEncode
+// and cToolArgs must account for: carried to an ffmpeg option, or rejected
+// outright the way StrictBitrate is. cToolArgs asserts it; see the caveat
+// there for what a count can and cannot catch.
 const cfgMirroredFields = 11
 
 // runOracle runs ffmpeg with args under oracleTimeout and returns its stdout.

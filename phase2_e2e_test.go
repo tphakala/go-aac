@@ -193,9 +193,11 @@ func TestWindowSequenceVsC(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := [][]float32{tc.src}
-			// DisableIS is load-bearing here, and only because DisablePNS is set
-			// too: the widening keys on (pns || intensity_stereo), so with either
-			// tool on it applies. It scales frameBr by 1.15, not the bandwidth
+			// DisableIS is not idle on a mono stream, and only because DisablePNS
+			// is set too: the widening keys on (pns || intensity_stereo), so with
+			// either tool on it applies. Both sides move together, since
+			// cToolArgs mirrors the switch, so this gate passes either way; the
+			// switch is set to keep it the tools-off comparison it documents. It scales frameBr by 1.15, not the bandwidth
 			// (aacenc.c:1609-1610, mirrored in internal/enc/encoder.go), which at
 			// this rate moves the coding bandwidth from 20000 Hz to 21200 Hz, a
 			// 6% widening from a 15% rate. Measured both ways on this config.
