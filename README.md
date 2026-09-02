@@ -268,10 +268,11 @@ for stereo at 48 kHz, and is likewise allocation-free per frame in steady state.
 ### Profiling
 
 Profile on Linux. On darwin/arm64, pprof fabricates hot spots: it has parked 10%
-to 16% of encode on cheap bulk-memory leaves (`encoding/binary.Uint16`,
-`runtime.memmove`) that direct measurement puts at 0.2% and 0.04%, wrong by 47x
-and 260x, and the phantom moves between runs while landing on whatever streaming
-leaf is nearby. The same benchmarks on linux/amd64 and linux/arm64 are clean, and
+to 16% of encode on cheap bulk-memory leaves
+(`encoding/binary.littleEndian.Uint16`, `runtime.memmove`) that direct
+measurement puts at 0.2% and 0.04%, wrong by 47x and 260x, and the phantom moves
+between runs while landing on whatever streaming leaf is nearby. The same
+benchmarks on linux/amd64 and linux/arm64 are clean, and
 cumulative shares for large subsystems stay trustworthy on macOS; it is leaf
 attribution that is not. If you must profile on a Mac, reconcile every leaf
 number against call counts before acting on it: count the calls, microbenchmark
