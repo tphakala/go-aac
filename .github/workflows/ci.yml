@@ -40,6 +40,21 @@ jobs:
   test:
     name: Test
     runs-on: ${{ matrix.os }}
+    # GOFLAGS applies -count=1 and -timeout=20m to every `go test` in this job,
+    # stated once here rather than repeated per step (a flag in GOFLAGS is
+    # applied only to a command that knows it, so `go mod download` and setup-go's
+    # own `go env` ignore both). -count=1 defeats actions/setup-go's restored test
+    # cache, which is keyed on go.mod rather than the commit: without it a step can
+    # serve a cached ok having run no tests, on a re-run against an unchanged SHA
+    # or any later push whose Go inputs are unchanged, such as a docs-only or
+    # workflow-only commit (issue #94). -timeout=20m overrides Go's 10-minute
+    # per-binary default; the root race binary with the edge-config soak is the
+    # long pole, and blowing the default surfaces as a panic that reads like a
+    # hang rather than a slow runner (issue #62). Stating it once is also what
+    # keeps the steps from drifting apart, which is how some of them lost the
+    # flags before.
+    env:
+      GOFLAGS: "-count=1 -timeout=20m"
     strategy:
       fail-fast: false
       matrix:
@@ -56,30 +71,13 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # -timeout 20m overrides Go's 10-minute per-binary default. The root
-      # package's race binary is the long pole and the edge-config soak added to
-      # it, so the margin against a slow or loaded runner is smaller than it was.
-      # Blowing the default surfaces as a panic stack dump that reads like a
-      # hang rather than like a slow runner, which is the issue #62 failure mode.
-      #
-      # -count=1 on every test step here, not only on the oracle job and the
-      # non-race step below. actions/setup-go restores GOCACHE, which holds Go's
-      # test-result cache, and keys that cache on go.mod (its dependencyFilePattern
-      # at v7) rather than on the commit. So a step without the flag can serve a
-      # cached ok and report green having run no tests, on a "Re-run all jobs"
-      # against an unchanged SHA and equally on any later push whose Go inputs
-      # are unchanged, such as a docs-only or workflow-only commit. The price is
-      # paid on every run that arrives with a warm cache, not only on a re-run,
-      # and it is per step rather than per job: on ubuntu that is the coverage
-      # race lane plus the noasm race lane plus the no-race lane. A lane that
-      # does not run its tests is worth less than that (issue #94).
       - name: Run tests
         if: matrix.os != 'ubuntu-latest'
-        run: go test -count=1 -race -timeout 20m ./...
+        run: go test -race ./...
 
       - name: Run tests with coverage
         if: matrix.os == 'ubuntu-latest'
-        run: go test -count=1 -race -timeout 20m -coverprofile=coverage.out -covermode=atomic ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest'
@@ -94,7 +92,7 @@ jobs:
       # assembly; its scalar kernels are byte-identical but must be tested on
       # every arch this matrix covers or they can rot unnoticed.
       - name: Run tests (noasm)
-        run: go test -count=1 -race -timeout 20m -tags noasm ./...
+        run: go test -race -tags noasm ./...
 
       # The non-race pass. Until this step existed, the ONLY non-race lane was
       # the differential-oracle job, which is ubuntu-latest, so every test whose
@@ -115,12 +113,12 @@ jobs:
       #
       # On ubuntu this overlaps the oracle job's first pass, which runs the same
       # suite with the oracle env and so covers strictly more (it differs only in
-      # lacking an explicit -timeout). That overlap is deliberate rather than an
+      # lacking the -timeout this job sets via GOFLAGS). That overlap is deliberate rather than an
       # oversight: the oracle job can fail while
       # building FFmpeg, for reasons that have nothing to do with the suite, and
       # this step is what keeps a non-race regression visible when it does.
       - name: Run tests (no race)
-        run: go test -count=1 -timeout 20m ./...
+        run: go test ./...
 
   lint:
     name: Lint

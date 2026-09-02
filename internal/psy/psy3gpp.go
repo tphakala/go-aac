@@ -137,7 +137,8 @@ func calcThr3gpp(wi *WindowInfo, numBands int, pch *channel, bandSizes []uint8,
 
 // analyzeChannel computes band thresholds for one channel as suggested in
 // 3GPP TS26.403. Mirrors aacpsy.c:psy_3gpp_analyze_channel @ d09d5afc3a.
-// The QSCALE branch is not ported (ABR only in Phase 2). The complexity
+// The QSCALE branch is not ported: the pipeline never sets AV_CODEC_FLAG_QSCALE
+// (no VBR mode in the API), so only the ABR path runs. The complexity
 // waiver covers a faithful port of a single 200-line C function; splitting
 // the threshold-reduction stages would break the line-by-line mapping to
 // the pinned source (docs/porting-guide.md ground rule 1).

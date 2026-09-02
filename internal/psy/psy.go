@@ -222,7 +222,8 @@ func ath(f, add float32) float32 {
 // ff_psy_init (psymodel.c:28-65) @ d09d5afc3a. bands/numBands carry the
 // long ([0]) and short ([1]) scalefactor band tables; cutoff is the coding
 // bandwidth in Hz (always non-zero: the encoder computes it at init).
-// The QSCALE/global_quality branches are not ported (ABR only in Phase 2).
+// The QSCALE/global_quality branches are not ported: the pipeline never sets
+// AV_CODEC_FLAG_QSCALE (no VBR mode in the API), so only the ABR path runs.
 func New(sampleRate, bitRate, channels, cutoff int, bands [2][]uint8, numBands [2]int) *Context {
 	ctx := &Context{}
 	ctx.Reset(sampleRate, bitRate, channels, cutoff, bands, numBands)

@@ -77,7 +77,7 @@ func TestAfconvertParity(t *testing.T) {
 			_ = os.Remove(aac)
 			// -b >= 96 kbps keeps afconvert from downsampling; -d aac forces LC
 			// (never HE-AAC/SBR, which the decoder does not support).
-			cmd := exec.Command(afconvert, "-f", "adts", "-d", "aac", "-b", "128000", "-s", "0", wav, aac)
+			cmd := exec.CommandContext(oracleCtx(t), afconvert, "-f", "adts", "-d", "aac", "-b", "128000", "-s", "0", wav, aac)
 			if out, cerr := cmd.CombinedOutput(); cerr != nil {
 				t.Fatalf("afconvert: %v\n%s", cerr, out)
 			}
@@ -92,7 +92,7 @@ func TestAfconvertParity(t *testing.T) {
 
 			got := decodeStream(t, aac)
 
-			cmdO := exec.Command(ff, "-loglevel", "error", "-bitexact", "-c:a",
+			cmdO := exec.CommandContext(oracleCtx(t), ff, "-loglevel", "error", "-bitexact", "-c:a",
 				"aac_fixed", "-i", aac, "-bitexact", "-f", "s16le", "-")
 			want, werr := cmdO.Output()
 			if werr != nil {

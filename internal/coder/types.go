@@ -3,8 +3,7 @@
 // Package coder implements the quantizer searches, the codebook sectioning
 // trellis and the spectral quantize-and-encode core of the AAC encoder.
 // Mirrors libavcodec/aaccoder.c, aaccoder_trellis.h, aacenc_quantization.h,
-// aacenc_quantization_misc.h and aacenc_utils.h @ d09d5afc3a. Phase 1 ships
-// the fast search only; twoloop and NMR arrive in later phases.
+// aacenc_quantization_misc.h and aacenc_utils.h @ d09d5afc3a.
 package coder
 
 import "fmt"
@@ -76,8 +75,7 @@ const (
 )
 
 // IndividualChannelStream is the per-channel window and band metadata.
-// Mirrors struct IndividualChannelStream (libavcodec/aacenc.h @ d09d5afc3a);
-// TNS fields arrive with TNS in a later phase.
+// Mirrors struct IndividualChannelStream (libavcodec/aacenc.h @ d09d5afc3a).
 type IndividualChannelStream struct {
 	MaxSfb              int      // number of scalefactor bands per group
 	WindowSequence      [2]int   // current and previous window sequence

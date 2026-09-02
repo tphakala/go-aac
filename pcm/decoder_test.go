@@ -97,7 +97,7 @@ func TestDecodeStreamVsOracle(t *testing.T) {
 	for name, wantHash := range refs {
 		t.Run(name, func(t *testing.T) {
 			adts := filepath.Join(decoderTestdata, name)
-			cmd := exec.Command(ff, "-loglevel", "error", "-bitexact", "-c:a",
+			cmd := exec.CommandContext(oracleCtx(t), ff, "-loglevel", "error", "-bitexact", "-c:a",
 				"aac_fixed", "-i", adts, "-bitexact", "-f", "s16le", "-")
 			want, err := cmd.Output()
 			if err != nil {
