@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 package mdct
 
-import "math"
+import (
+	"math"
+
+	"github.com/tphakala/go-aac/internal/fmath"
+)
 
 // MDCT computes a forward MDCT with n output coefficients from 2n inputs:
 //
@@ -43,8 +47,8 @@ func New(n int, scale float64) *MDCT {
 	s := math.Sqrt(math.Abs(scale))
 	for i := range n / 2 {
 		a := math.Pi * (float64(i) + 0.125) / float64(n)
-		m.expRe[i] = math.Cos(a) * s
-		m.expIm[i] = math.Sin(a) * s
+		m.expRe[i] = fmath.Cos(a) * s
+		m.expIm[i] = fmath.Sin(a) * s
 	}
 	return m
 }
@@ -70,17 +74,17 @@ func (m *MDCT) Transform(dst, src []float32) {
 			tim = float64(src[k-len2]) - float64(src[len3-1-k])
 		}
 		er, ei := m.expRe[i], m.expIm[i]
-		m.zim[i] = tre*er - tim*ei
-		m.zre[i] = tre*ei + tim*er
+		m.zim[i] = float64(tre*er) - float64(tim*ei) // no FMA
+		m.zre[i] = float64(tre*ei) + float64(tim*er) // no FMA
 	}
 	m.fft.transform(m.zre, m.zim)
 	for i := range len4 {
 		i0, i1 := len4+i, len4-i-1
 		e0r, e0i := m.expRe[i0], m.expIm[i0]
 		e1r, e1i := m.expRe[i1], m.expIm[i1]
-		dst[2*i1+1] = float32(m.zre[i0]*e0i - m.zim[i0]*e0r)
-		dst[2*i0] = float32(m.zre[i0]*e0r + m.zim[i0]*e0i)
-		dst[2*i0+1] = float32(m.zre[i1]*e1i - m.zim[i1]*e1r)
-		dst[2*i1] = float32(m.zre[i1]*e1r + m.zim[i1]*e1i)
+		dst[2*i1+1] = float32(float64(m.zre[i0]*e0i) - float64(m.zim[i0]*e0r)) // no FMA
+		dst[2*i0] = float32(float64(m.zre[i0]*e0r) + float64(m.zim[i0]*e0i))   // no FMA
+		dst[2*i0+1] = float32(float64(m.zre[i1]*e1i) - float64(m.zim[i1]*e1r)) // no FMA
+		dst[2*i1] = float32(float64(m.zre[i1]*e1r) + float64(m.zim[i1]*e1i))   // no FMA
 	}
 }

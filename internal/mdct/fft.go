@@ -5,7 +5,11 @@
 // @ d09d5afc3a). Internals are float64 for headroom; the API is float32.
 package mdct
 
-import "math"
+import (
+	"math"
+
+	"github.com/tphakala/go-aac/internal/fmath"
+)
 
 // fft is an iterative radix-2 forward DFT (negative exponent) for
 // power-of-two sizes, with precomputed twiddles and bit-reversal table.
@@ -29,8 +33,8 @@ func newFFT(n int) *fft {
 		f.rev[i] = r
 	}
 	for k := range n / 2 {
-		f.cos[k] = math.Cos(2 * math.Pi * float64(k) / float64(n))
-		f.sin[k] = math.Sin(2 * math.Pi * float64(k) / float64(n))
+		f.cos[k] = fmath.Cos(2 * math.Pi * float64(k) / float64(n))
+		f.sin[k] = fmath.Sin(2 * math.Pi * float64(k) / float64(n))
 	}
 	return f
 }
@@ -51,8 +55,8 @@ func (f *fft) transform(re, im []float64) {
 				k := j * step
 				wr, wi := f.cos[k], -f.sin[k]
 				i0, i1 := base+j, base+j+half
-				tr := re[i1]*wr - im[i1]*wi
-				ti := re[i1]*wi + im[i1]*wr
+				tr := float64(re[i1]*wr) - float64(im[i1]*wi) // no FMA
+				ti := float64(re[i1]*wi) + float64(im[i1]*wr) // no FMA
 				re[i1], im[i1] = re[i0]-tr, im[i0]-ti
 				re[i0], im[i0] = re[i0]+tr, im[i0]+ti
 			}
