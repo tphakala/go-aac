@@ -3,76 +3,29 @@
 package aac
 
 import (
-	"bytes"
-	"context"
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/tphakala/go-aac/internal/enc"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // The C side of the differential gates: running the pinned ffmpeg, deriving
 // its options from an enc.Config, and scoring a Go stream against the C
 // stream. Every oracle test in this package goes through these, so a Go
 // config and its C mirror are never two separately maintained literals, and
-// every subprocess is bounded. ffmpegBin (phase1_e2e_test.go) is the entry
-// point that finds the binary or skips.
-
-// oracleTimeout bounds one ffmpeg invocation. The longest is the 24 s stereo
-// castanet encode at 192 kb/s, measured under 3 s on a laptop, so this is a
-// wide margin for a loaded runner while still surfacing a hung oracle as a
-// named failure instead of the test binary's own timeout panic twenty minutes
-// later.
-const oracleTimeout = 2 * time.Minute
+// every subprocess is bounded. oracletest.FFmpegBin is the entry point that
+// finds the binary or skips.
 
 // cfgMirroredFields is enc.Config's field count, every one of which cEncode
 // and cToolArgs must account for: carried to an ffmpeg option, or rejected
 // outright the way StrictBitrate is. cToolArgs asserts it; see the caveat
 // there for what a count can and cannot catch.
 const cfgMirroredFields = 11
-
-// runOracle runs ffmpeg with args under oracleTimeout and returns its stdout.
-// Every caller passes -v error, so anything on stderr is a failure. The three
-// ways it can fail are reported apart, because they need different fixes: it
-// never started, it ran out of time, or it ran and failed or complained.
-//
-// "Never started" is keyed on a nil ProcessState rather than on an error type.
-// Wait sets ProcessState for every process that actually ran, including one the
-// deadline killed, while both spawn failures leave it nil: *exec.Error when a
-// bare name misses on PATH, and *fs.PathError from fork/exec when a path is
-// missing, a directory, or not executable. GOAAC_FFMPEG is a path that
-// ffmpegBin has stat'ed, so it is the second of those that this test suite can
-// actually produce.
-func runOracle(t *testing.T, ffmpeg string, args ...string) []byte {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), oracleTimeout)
-	defer cancel()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, ffmpeg, args...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	switch {
-	case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
-		t.Fatalf("ffmpeg did not finish within %v: %v", oracleTimeout, args)
-	case err != nil && cmd.ProcessState == nil:
-		t.Fatalf("cannot run GOAAC_FFMPEG=%q: %v", ffmpeg, err)
-	case err != nil:
-		t.Fatalf("ffmpeg failed: %v\n%s", err, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Fatalf("ffmpeg -v error reported diagnostics:\n%s", stderr.String())
-	}
-	return stdout.Bytes()
-}
 
 // cCoderName maps an internal coder kind onto the C's -aac_coder value.
 func cCoderName(kind enc.CoderKind) string {
@@ -105,7 +58,7 @@ func cToolArgs(t *testing.T, cfg enc.Config) []string {
 	// REMOVED; a rename, or a removal and an addition in one change, keeps the
 	// count and still needs a reader. cEncode mirrors SampleRate, Bitrate and
 	// Channels; the switches below mirror the rest; StrictBitrate fails loudly
-	// just below. It fires only where an oracle test runs, since ffmpegBin
+	// just below. It fires only where an oracle test runs, since oracletest.FFmpegBin
 	// skips without GOAAC_FFMPEG, so CI reaches it in the oracle job alone.
 	if n := reflect.TypeFor[enc.Config]().NumField(); n != cfgMirroredFields {
 		t.Fatalf("enc.Config has %d fields, cEncode and cToolArgs mirror %d: add the "+
@@ -137,7 +90,7 @@ func cToolArgs(t *testing.T, cfg enc.Config) []string {
 	return args
 }
 
-// cEncode runs the pinned C encoder over rawPath, raw f32le as writeRawF32
+// cEncode runs the pinned C encoder over rawPath, raw f32le as oracletest.WriteRawF32
 // lays it out, at the settings that mirror cfg, and writes an ADTS stream to
 // outPath. It returns nothing: a caller that needs the bytes reads the file,
 // which is also what checkGateVsC scores, so size and PSNR see the same bytes.
@@ -150,69 +103,8 @@ func cEncode(t *testing.T, ffmpeg, rawPath string, cfg enc.Config, outPath strin
 	args = append(args, cToolArgs(t, cfg)...)
 	args = append(args, "-b:a", fmt.Sprint(cfg.Bitrate), "-flags", "+bitexact",
 		"-f", "adts", outPath)
-	if out := runOracle(t, ffmpeg, args...); len(out) > 0 {
+	if out := oracletest.Run(t, ffmpeg, args...); len(out) > 0 {
 		t.Fatalf("C encode wrote %d bytes to stdout", len(out))
-	}
-}
-
-// ffmpegDecode decodes an ADTS file to planar float32 with the pinned ffmpeg,
-// one slice per channel, failing on any decoder diagnostic. It deinterleaves
-// here, the way pcm's twin does, so no caller carries the split.
-func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
-	t.Helper()
-	raw := runOracle(t, ffmpeg, "-v", "error", "-i", path,
-		"-f", "f32le", "-c:a", "pcm_f32le", "-")
-	n := len(raw) / 4 / channels
-	// A decode too short to score is not a result: psnr accumulates nothing
-	// once the priming delay passes the end, divides zero by zero and returns
-	// NaN, and every bound below is a `<` comparison that NaN passes. The
-	// threshold is the delay rather than zero because that is where the
-	// accumulator empties, so a single access unit decoding to exactly
-	// EncoderDelay samples is caught too. This is the decode-side twin of
-	// checkGateVsC's empty-stream precondition.
-	if n <= EncoderDelay {
-		t.Fatalf("ffmpeg decoded %s to %d samples per channel, at or below the "+
-			"%d-sample priming delay, so psnr would return NaN and pass every bound "+
-			"(%d bytes, %d channels)", path, n, EncoderDelay, len(raw), channels)
-	}
-	out := make([][]float32, channels)
-	for c := range out {
-		out[c] = make([]float32, n)
-	}
-	for i := range n {
-		for c := range channels {
-			out[c][i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[(i*channels+c)*4:]))
-		}
-	}
-	return out
-}
-
-// ffmpegDecodeStream writes an in-memory ADTS stream to a temp file and decodes
-// it through ffmpegDecode, so a caller holding bytes rather than a path does not
-// carry the write. Every gate that encodes to memory and then scores the decode
-// reaches the decoder through here.
-func ffmpegDecodeStream(t *testing.T, ffmpeg string, stream []byte, channels int) [][]float32 {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "stream.adts")
-	if err := os.WriteFile(p, stream, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return ffmpegDecode(t, ffmpeg, p, channels)
-}
-
-// writeRawF32 writes planar src as the interleaved raw f32le the C encoder
-// reads with -f f32le -ac <channels>.
-func writeRawF32(t *testing.T, path string, src [][]float32) {
-	t.Helper()
-	ch := len(src)
-	raw := make([]byte, 4*ch*len(src[0]))
-	for i := range src[0] {
-		for c := range ch {
-			binary.LittleEndian.PutUint32(raw[4*(i*ch+c):], math.Float32bits(src[c][i]))
-		}
-	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -223,7 +115,7 @@ func writeRawF32(t *testing.T, path string, src [][]float32) {
 func rawF32Path(t *testing.T, src [][]float32) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "src.f32")
-	writeRawF32(t, p, src)
+	oracletest.WriteRawF32(t, p, src)
 	return p
 }
 
@@ -305,11 +197,11 @@ func checkGateVsC(t *testing.T, ffmpeg string, src [][]float32, goStream []byte,
 	ch := len(src)
 	worstDelta := math.Inf(1)
 	meanDelta := 0.0
-	decG := ffmpegDecodeStream(t, ffmpeg, goStream, ch)
-	decC := ffmpegDecode(t, ffmpeg, cPath, ch)
+	decG := oracletest.DecodeStream(t, ffmpeg, goStream, ch, EncoderDelay)
+	decC := oracletest.DecodeFile(t, ffmpeg, cPath, ch, EncoderDelay)
 	for c := range ch {
-		pg := psnr(src[c], decG[c], EncoderDelay)
-		pc := psnr(src[c], decC[c], EncoderDelay)
+		pg := oracletest.PSNRPrefix(src[c], decG[c], EncoderDelay)
+		pc := oracletest.PSNRPrefix(src[c], decC[c], EncoderDelay)
 		t.Logf("ch %d: Go %.2f dB, C %.2f dB (%+.2f), size %+.2f%%",
 			c, pg, pc, pg-pc, sizeDelta)
 		worstDelta = math.Min(worstDelta, pg-pc)

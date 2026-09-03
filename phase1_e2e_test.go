@@ -5,50 +5,11 @@ package aac
 import (
 	"fmt"
 	"math"
-	"os"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
-
-// ffmpegBin returns the pinned FFmpeg CLI named by GOAAC_FFMPEG, skipping the
-// test when it is unset. The gate compares against FFmpeg pinned at d09d5afc3a;
-// a distro ffmpeg is not a valid oracle (it predates the NMR coder), so there is
-// deliberately no default path to fall back on.
-func ffmpegBin(t *testing.T) string {
-	t.Helper()
-	p := os.Getenv("GOAAC_FFMPEG")
-	if p == "" {
-		skipOrFatalOracle(t, "GOAAC_FFMPEG is not set; skipping the C differential gate")
-	}
-	fi, err := os.Stat(p)
-	if err != nil {
-		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is not usable: %v", p, err))
-	}
-	// Stat succeeds on a directory, and the easy mistake is pointing at the
-	// FFmpeg build tree instead of the binary inside it. Catch it here, where
-	// the message can say so, rather than at the first exec.
-	if fi.IsDir() {
-		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is a directory, not the ffmpeg binary", p))
-	}
-	return p
-}
-
-// skipOrFatalOracle skips the calling test, or fails it when
-// GOAAC_REQUIRE_ORACLE is set to a non-empty value.
-//
-// Skipping is right for a contributor without the pinned FFmpeg. It is wrong
-// for a runner whose whole job is to run the gate: a mistyped path or a broken
-// build would skip every differential test and still print ok, which is exactly
-// how a rate-control regression once passed CI green. The CI oracle job sets
-// GOAAC_REQUIRE_ORACLE so that an absent oracle reports red.
-func skipOrFatalOracle(t *testing.T, msg string) {
-	t.Helper()
-	if os.Getenv("GOAAC_REQUIRE_ORACLE") != "" {
-		t.Fatalf("GOAAC_REQUIRE_ORACLE is set, so a missing oracle is a failure: %s", msg)
-	}
-	t.Skip(msg)
-}
 
 // synthTonal generates n samples of a deterministic three-tone mix, the
 // tonal Phase 1 gate signal (issue #3: tonal corpus).
@@ -72,28 +33,8 @@ func encodeADTS(t *testing.T, cfg enc.Config, src []float32) []byte {
 	return encodeADTSPlanar(t, cfg, [][]float32{src})
 }
 
-// psnr computes 10*log10(1/MSE) against full-scale 1.0 between src and
-// dec[delay:], the documented Phase 1 PSNR definition.
-func psnr(src, dec []float32, delay int) float64 {
-	var mse float64
-	n := 0
-	for i := range src {
-		if delay+i >= len(dec) {
-			break
-		}
-		d := float64(src[i]) - float64(dec[delay+i])
-		mse += d * d
-		n++
-	}
-	mse /= float64(n)
-	if mse == 0 {
-		return math.Inf(1)
-	}
-	return 10 * math.Log10(1/mse)
-}
-
 func TestPhase1Gate(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	for _, rate := range []int{44100, 48000} {
 		t.Run(fmt.Sprintf("%dHz", rate), func(t *testing.T) {
 			n := rate * 5
@@ -102,12 +43,12 @@ func TestPhase1Gate(t *testing.T) {
 
 			// Mono, so the one decoded channel is the signal; the issue #3
 			// gate demands zero decoder diagnostics at -v error, which
-			// ffmpegDecode enforces.
-			dec := ffmpegDecodeStream(t, ffmpeg, stream, 1)[0]
+			// oracletest.DecodeStream enforces.
+			dec := oracletest.DecodeStream(t, ffmpeg, stream, 1, EncoderDelay)[0]
 			if len(dec) < n {
 				t.Fatalf("decoded %d samples, want >= %d", len(dec), n)
 			}
-			got := psnr(src, dec, EncoderDelay)
+			got := oracletest.PSNRPrefix(src, dec, EncoderDelay)
 			t.Logf("rate %d: %d bytes ADTS, decoded %d samples, PSNR %.2f dB",
 				rate, len(stream), len(dec), got)
 			if got < 30 {

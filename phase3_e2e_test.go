@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // synthStereoNMR builds a stereo pair exercising the NMR stereo decisions:
@@ -41,7 +42,7 @@ func synthStereoNMR(n, rate int) [][]float32 {
 // ffmpeg. It scores through the shared gate under phase3Bounds, which keep
 // this gate's worst-channel rule rather than Phase 4's mean rule.
 func TestPhase3NMRGateVsC(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	sigs := []gateSignal{
 		newGateSignal(t, "stereo tonal", synthStereoNMR(44100*8, 44100)),
 		newGateSignal(t, sigStereoCastanets, castanetsChannels(archChanStereo, 44100, 44100*6)),

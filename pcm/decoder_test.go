@@ -8,10 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // decoderTestdata is the package-owned decoder corpus: the ADTS streams plus a
@@ -92,17 +93,13 @@ func TestDecodeStreamHermetic(t *testing.T) {
 // manifest still matches the oracle (so a stale manifest cannot hide a
 // regression). Gated on GOAAC_FFMPEG so CI without the oracle skips it.
 func TestDecodeStreamVsOracle(t *testing.T) {
-	ff := ffmpegBin(t)
+	ff := oracletest.FFmpegBin(t)
 	refs := decoderRefs(t)
 	for name, wantHash := range refs {
 		t.Run(name, func(t *testing.T) {
 			adts := filepath.Join(decoderTestdata, name)
-			cmd := exec.CommandContext(oracleCtx(t), ff, "-loglevel", "error", "-bitexact", "-c:a",
+			want := oracletest.Run(t, ff, "-loglevel", "error", "-bitexact", "-c:a",
 				"aac_fixed", "-i", adts, "-bitexact", "-f", "s16le", "-")
-			want, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("oracle decode %s: %v", adts, err)
-			}
 			// Manifest honesty: the committed hash must match the live oracle.
 			sum := sha256.Sum256(want)
 			if h := hex.EncodeToString(sum[:]); h != wantHash {

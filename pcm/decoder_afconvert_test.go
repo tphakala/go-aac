@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // writeTestWAV writes a canonical 16-bit PCM WAV of a low-frequency sine to
@@ -58,7 +60,7 @@ func TestAfconvertParity(t *testing.T) {
 	if err != nil {
 		t.Skip("afconvert not available (macOS only)")
 	}
-	ff := ffmpegBin(t)
+	ff := oracletest.FFmpegBin(t)
 
 	dir := t.TempDir()
 	for _, tc := range []struct {
@@ -77,7 +79,7 @@ func TestAfconvertParity(t *testing.T) {
 			_ = os.Remove(aac)
 			// -b >= 96 kbps keeps afconvert from downsampling; -d aac forces LC
 			// (never HE-AAC/SBR, which the decoder does not support).
-			cmd := exec.CommandContext(oracleCtx(t), afconvert, "-f", "adts", "-d", "aac", "-b", "128000", "-s", "0", wav, aac)
+			cmd := exec.CommandContext(oracletest.Ctx(t), afconvert, "-f", "adts", "-d", "aac", "-b", "128000", "-s", "0", wav, aac)
 			if out, cerr := cmd.CombinedOutput(); cerr != nil {
 				t.Fatalf("afconvert: %v\n%s", cerr, out)
 			}
@@ -92,12 +94,8 @@ func TestAfconvertParity(t *testing.T) {
 
 			got := decodeStream(t, aac)
 
-			cmdO := exec.CommandContext(oracleCtx(t), ff, "-loglevel", "error", "-bitexact", "-c:a",
+			want := oracletest.Run(t, ff, "-loglevel", "error", "-bitexact", "-c:a",
 				"aac_fixed", "-i", aac, "-bitexact", "-f", "s16le", "-")
-			want, werr := cmdO.Output()
-			if werr != nil {
-				t.Fatalf("oracle decode: %v", werr)
-			}
 			if len(got) != len(want) {
 				t.Fatalf("length mismatch: pcm %d, oracle %d", len(got), len(want))
 			}
