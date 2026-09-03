@@ -3,6 +3,7 @@
 *.exe
 *.test
 *.out
+*.o
 
 # Coverage and profiling
 coverage.out
@@ -11,8 +12,7 @@ coverage.txt
 *.prof
 *.pprof
 
-# Planning artifacts must never reach the public repo (canonical copies live
-# in the internal Forgejo tphakala/go-aac repo under docs/).
+# Local design and planning notes are not part of the published repo.
 /docs/
 
 # C dump harness (arrives in Phase 0b): binary and scratch fixture output.
@@ -34,11 +34,13 @@ tools/cdec2/cdec2
 .serena/
 .claude/
 
-# local tool cache (sentrux/opencode/etc.)
+# Local tool cache
 cache/
 
-# CodeGraph index database (local code intelligence)
+# Local code-intelligence index
 .codegraph/
+
+# quant fixture harness binary (source and committed fixtures are tracked).
 tools/cquant/cquant
 
 # psy model fixture harness (arrives in Phase 2): binaries and scratch
