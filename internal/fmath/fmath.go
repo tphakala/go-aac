@@ -4,6 +4,18 @@
 // (docs/go-design.md: only this package imports math in per-frame code). It
 // also holds shared scalar helpers (Absf, Clipf, Clipi) that use only Go
 // builtins and add no math import, so the package fence stays intact.
+//
+// The transcendentals (Exp/Exp2/Log/Log2/Pow/Atan/Sin/Cos and their float32
+// wrappers) are backed by architecture-deterministic implementations vendored
+// from the Go standard library in portable_*.go; see PROVENANCE.md ("Go
+// standard library derivations") and issue #79. Sqrt/Ceil/Round stay on package
+// math and are architecture-identical (Sqrt is a single correctly-rounded
+// hardware instruction). Cbrt also stays on math; it does fuse into an FMA on
+// arm64, but the encoder reaches it only through Cbrt32 to build the init-time
+// Pow43 dequant table (internal/tables), and its sub-ULP arm64 effect is
+// absorbed by that table's float32 entries. That absorption is not proven by
+// this FMA guard; it is backstopped end to end by TestEncoderArchDeterminism,
+// which CI runs on both arm64 and amd64.
 package fmath
 
 import "math"
@@ -19,6 +31,14 @@ import "math"
 // x = 713, and I0 is even, so folding the sign and saturating above 700 is
 // exact for every argument the caller can reach. KBD window generation passes
 // x <= 13, so none of these paths are taken in practice.
+//
+// BesselI0 feeds both the encoder's float32 KBD window (internal/window.KBD)
+// and the decoder's int32 KBDFixed (internal/window/fixed.go). The float64
+// product below is barriered so the sum accumulation cannot contract to an
+// FMADDD on arm64; the barrier is value-neutral on amd64 and its arm64 effect
+// rounds away in both the float32 and the int32 quantization, so both tables
+// stay byte-identical (encoder pinned by TestWindowTablesGolden, decoder by
+// internal/dec's TestIMDCTDump).
 func BesselI0(x float64) float64 {
 	switch {
 	case math.IsNaN(x):
@@ -35,7 +55,7 @@ func BesselI0(x float64) float64 {
 	sum, term := 1.0, 1.0
 	for k := 1; ; k++ {
 		h := x / (2 * float64(k))
-		term *= h * h
+		term = float64(term * (h * h)) // barriered so sum += term does not contract to FMADDD
 		sum += term
 		if term < 1e-17*sum {
 			return sum
@@ -53,18 +73,18 @@ func Cbrt32(x float32) float32 { return float32(math.Cbrt(float64(x))) }
 
 // Log232 is float32 base-2 logarithm, replacing C log2f. Computed in
 // float64 and rounded once to float32.
-func Log232(x float32) float32 { return float32(math.Log2(float64(x))) }
+func Log232(x float32) float32 { return float32(log2(float64(x))) }
 
 // Inf32 is the positive float32 infinity.
 func Inf32() float32 { return float32(math.Inf(1)) }
 
 // Atan32 is float32 arctangent, replacing C atanf. Computed in float64 and
 // rounded once to float32.
-func Atan32(x float32) float32 { return float32(math.Atan(float64(x))) }
+func Atan32(x float32) float32 { return float32(atan(float64(x))) }
 
 // Exp232 is float32 base-2 exponential, replacing C exp2f. Computed in
 // float64 and rounded once to float32.
-func Exp232(x float32) float32 { return float32(math.Exp2(float64(x))) }
+func Exp232(x float32) float32 { return float32(exp2(float64(x))) }
 
 // NaN32 is a float32 quiet NaN, replacing C NAN.
 func NaN32() float32 { return float32(math.NaN()) }
@@ -74,29 +94,37 @@ const mLog210 = 3.32192809488736234787031942948939
 
 // Exp10 computes 10**x exactly like libavutil/ffmath.h:ff_exp10
 // @ d09d5afc3a: exp2(M_LOG2_10 * x). Used by the psy model init.
-func Exp10(x float64) float64 { return math.Exp2(mLog210 * x) }
+func Exp10(x float64) float64 { return exp2(mLog210 * x) }
 
 // Pow is a float64 pass-through for init-time code outside the depguard
 // math fence (the psy ATH curve runs once per encoder init).
-func Pow(x, y float64) float64 { return math.Pow(x, y) }
+func Pow(x, y float64) float64 { return pow(x, y) }
 
 // Exp is a float64 pass-through for init-time code (psy ATH curve).
-func Exp(x float64) float64 { return math.Exp(x) }
+func Exp(x float64) float64 { return exp(x) }
 
 // Exp2 is a float64 pass-through for init-time code (psy min_snr).
-func Exp2(x float64) float64 { return math.Exp2(x) }
+func Exp2(x float64) float64 { return exp2(x) }
 
 // Exp32 is float32 natural exponential, replacing C expf. Computed in
 // float64 and rounded once to float32.
-func Exp32(x float32) float32 { return float32(math.Exp(float64(x))) }
+func Exp32(x float32) float32 { return float32(exp(float64(x))) }
 
 // Log32 is float32 natural logarithm, replacing C logf. Computed in
 // float64 and rounded once to float32.
-func Log32(x float32) float32 { return float32(math.Log(float64(x))) }
+func Log32(x float32) float32 { return float32(log(float64(x))) }
 
 // Pow32 is float32 power, replacing C powf. Computed in float64 and
 // rounded once to float32.
-func Pow32(x, y float32) float32 { return float32(math.Pow(float64(x), float64(y))) }
+func Pow32(x, y float32) float32 { return float32(pow(float64(x), float64(y))) }
+
+// Sin is float64 sine with an architecture-deterministic implementation
+// (see portable_sincos.go), replacing math.Sin in the encoder.
+func Sin(x float64) float64 { return sin(x) }
+
+// Cos is float64 cosine with an architecture-deterministic implementation
+// (see portable_sincos.go), replacing math.Cos in the encoder.
+func Cos(x float64) float64 { return cos(x) }
 
 // Ceil32 is float32 ceiling, replacing C ceilf.
 func Ceil32(x float32) float32 { return float32(math.Ceil(float64(x))) }

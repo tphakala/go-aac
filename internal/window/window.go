@@ -54,7 +54,7 @@ func KBD(alpha float64, n int) []float32 {
 func Sine(n int) []float32 {
 	w := make([]float32, n)
 	for i := range n {
-		w[i] = float32(math.Sin((float64(i) + 0.5) * math.Pi / (2 * float64(n))))
+		w[i] = float32(fmath.Sin((float64(i) + 0.5) * math.Pi / (2 * float64(n))))
 	}
 	return w
 }

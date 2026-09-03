@@ -133,6 +133,49 @@ rounded on every platform, so a computed table would not be bit-exact against
 the oracle. This mirrors FFmpeg's own `CONFIG_HARDCODED_TABLES` build option and
 is therefore equally a derivative of the pinned tree.
 
+## Go standard library derivations
+
+A small set of float64 transcendentals is vendored from the Go standard library
+rather than called through package `math`, so the encoder is bit-for-bit
+architecture-deterministic (issue #79). The standard library dispatches `Exp`,
+`Exp2`, `Log`, `Log2`, `Pow`, `Atan`, `Sin` and `Cos` to per-architecture
+assembly or to a portable Go path that gc contracts into fused multiply-adds on
+arm64, so the same input yields last-ulp-different results per architecture. A
+fused `a*b+c` also disagrees with the `-ffp-contract=off` C reference above.
+
+The vendored copies live in `internal/fmath/portable_*.go`, derived from Go
+1.27.0:
+
+- `portable_exp.go` from `src/math/exp.go` (`exp`, `exp2`, `expmulti`)
+- `portable_log.go` from `src/math/log.go` and `log10.go` (`log`, `log2`)
+- `portable_pow.go` from `src/math/pow.go` (`pow`, routed through the vendored
+  `exp`/`log`)
+- `portable_atan.go` from `src/math/atan.go` (`atan`, `satan`, `xatan`)
+- `portable_sincos.go` from `src/math/sin.go` and `trig_reduce.go` (`sin` and
+  `cos`, refactored into the `octantReduce`/`sinPoly`/`cosPoly` helpers, plus
+  `trigReduce` with the stdlib `shift`/`mask`/`bias` constants renamed to the
+  package-local `fshift`/`fmask`/`fbias`; `trigReduce` is exact integer
+  arithmetic and needs no barrier)
+
+The transformation is mechanical: every internal `a*b+c` gets an explicit
+`float64(...)` rounding barrier on the product so gc cannot contract it, and all
+nine vendored functions (the eight entry points above plus the `expmulti`
+helper) are marked `//go:noinline` so an inlined product cannot fuse with a
+caller's add. `float64(...)` of a float64 value is a no-op on `GOAMD64=v1`
+(which never fuses), so the fusion-only copies (`Exp2`, `Atan`, `Sin`, `Cos`)
+are bit-identical to the amd64 standard library and arm64 converges to them.
+`Exp`, `Log`, `Log2`, and `Pow` (which computes `Exp(y*Log(x))`) additionally
+leave the standard library's amd64 assembly path, so they change both arches to
+one deterministic value; the differential oracle gate bounds that drift. `internal/fmath/portable_det_test.go` pins the
+arch-independent output hash of every vendored function, and
+`TestNoFloat64FMAInDeterministicMath` asserts the compiled code carries no
+float64 FMA. These barriers also make a `GOAMD64=v3` build (which does fuse)
+safe.
+
+This vendored code is BSD-3-Clause licensed by The Go Authors, reproduced in
+`LICENSE.golang`, and is compatible with this repository's LGPL-2.1-or-later
+license.
+
 ## Per-function provenance
 
 Every ported function carries a comment naming its C origin and the pinned

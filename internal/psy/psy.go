@@ -207,13 +207,19 @@ const athAdd = 4
 // borrowed from LAME. Mirrors aacpsy.c:ath @ d09d5afc3a: the frequency
 // scaling is float32, the curve itself is computed in float64 like the C
 // (double constants promote the expression).
+//
+// Each term's product carries a float64() barrier so gc does not fuse it into
+// an FMADDD on arm64: the C reference is -ffp-contract=off, and the float64
+// curve is cast to float32 into the psy threshold, so a fused sub-ulp drift is
+// a latent architecture split (issue #79). The value is unchanged on amd64,
+// which does not fuse at GOAMD64=v1.
 func ath(f, add float32) float32 {
 	f /= 1000.0
 	fd := float64(f)
-	v := 3.64*fmath.Pow(fd, -0.8) -
-		6.8*fmath.Exp(-0.6*(fd-3.4)*(fd-3.4)) +
-		6.0*fmath.Exp(-0.15*(fd-8.7)*(fd-8.7)) +
-		(0.6+0.04*float64(add))*0.001*fd*fd*fd*fd
+	v := float64(3.64*fmath.Pow(fd, -0.8)) -
+		float64(6.8*fmath.Exp(-0.6*(fd-3.4)*(fd-3.4))) +
+		float64(6.0*fmath.Exp(-0.15*(fd-8.7)*(fd-8.7))) +
+		float64((0.6+float64(0.04*float64(add)))*0.001*fd*fd*fd*fd)
 	return float32(v)
 }
 

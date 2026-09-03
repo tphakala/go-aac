@@ -107,6 +107,21 @@ linters:
       for-loops: true
     exhaustive:
       default-signifies-exhaustive: true
+  exclusions:
+    rules:
+      # internal/fmath/portable_{atan,exp,log,pow,sincos}.go are derived from the
+      # Go standard library math functions (see PROVENANCE.md, "Go standard
+      # library derivations"); keep them structurally diffable against the
+      # upstream source rather than refactoring the copied control flow for
+      # cyclomatic complexity or a single-case special-value switch. The regex
+      # excludes portable_det_test.go, which is hand-written and not exempt.
+      - path: internal/fmath/portable_[a-z]+\.go
+        linters:
+          - gocyclo
+      - path: internal/fmath/portable_[a-z]+\.go
+        text: singleCaseSwitch
+        linters:
+          - gocritic
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
