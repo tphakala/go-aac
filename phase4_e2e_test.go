@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/enc"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // gateCastanetSecs is the length of the Phase 4 gate's castanet pair.
@@ -71,7 +72,7 @@ const (
 // C encoder's own, with the worst channel within 1.0 dB, and the Go streams
 // must decode cleanly under the pinned ffmpeg.
 func TestPhase4ToolsGateVsC(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	sigs := []gateSignal{
 		newGateSignal(t, "stereo tonal", synthStereoNMR(44100*8, 44100)),
 		newGateSignal(t, sigStereoCastanets,
@@ -101,17 +102,17 @@ func TestPhase4ToolsGateVsC(t *testing.T) {
 // beyond noise, and must leave tonal material untouched (TNS never fires
 // on it, so the streams are identical).
 func TestPhase4TNSAB(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	castaSrc := castanetsChannels(archChanStereo, 44100, 44100*6)
 	tonal := synthStereoNMR(44100*8, 44100)
 
 	run := func(src [][]float32, disableTNS bool) ([]byte, float64) {
 		stream := encodeADTSPlanar(t, enc.Config{SampleRate: 44100,
 			Bitrate: 128000, Channels: 2, DisableTNS: disableTNS}, src)
-		dec := ffmpegDecodeStream(t, ffmpeg, stream, 2)
+		dec := oracletest.DecodeStream(t, ffmpeg, stream, 2, EncoderDelay)
 		worst := math.Inf(1)
 		for c := range 2 {
-			worst = math.Min(worst, psnr(src[c], dec[c], EncoderDelay))
+			worst = math.Min(worst, oracletest.PSNRPrefix(src[c], dec[c], EncoderDelay))
 		}
 		return stream, worst
 	}
@@ -145,7 +146,7 @@ func TestPhase4TNSAB(t *testing.T) {
 // a FATE-style fuzz; the luckynight reference of upstream FATE is not
 // redistributable, so the methodology is mirrored on the castanet pair.
 func TestPhase4FATEAnalogues(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	src := castanetsChannels(archChanStereo, 44100, 44100*6)
 
 	cases := []struct {
@@ -167,7 +168,7 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 			cfg.Channels = 2
 			cfg.Coder = enc.CoderFast
 			stream := encodeADTSPlanar(t, cfg, src)
-			dec := ffmpegDecodeStream(t, ffmpeg, stream, 2)
+			dec := oracletest.DecodeStream(t, ffmpeg, stream, 2, EncoderDelay)
 			var err2 float64
 			n := 0
 			for c := range 2 {
@@ -234,7 +235,7 @@ func TestPhase4FATEAnalogues(t *testing.T) {
 // cell's enc.Config by cToolArgs, so the switch under test and its C mirror
 // are one literal rather than two.
 func TestPhase4NMRStereoSwitchesVsC(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	// castanetsChannels is the single generator for this corpus (see its doc
 	// in arch_determinism_test.go); use it rather than open-coding the seeds so
 	// this gate cannot drift from the corpus every sibling gate scores against.

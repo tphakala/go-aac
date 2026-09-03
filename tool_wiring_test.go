@@ -14,7 +14,7 @@ import (
 // Oracle-free wiring gates for the encoder tool switches, the companion to
 // TestEncoderMidSideWiring (edge_config_soak_test.go) which covers DisableMS.
 // Before this, DisableTNS, DisablePNS and DisableIS were reachable only through
-// TestPhase4TNSAB and TestPhase4FATEAnalogues, both of which call ffmpegBin(t)
+// TestPhase4TNSAB and TestPhase4FATEAnalogues, both of which call oracletest.FFmpegBin(t)
 // and skip unless GOAAC_FFMPEG points at the pinned oracle build. In a normal
 // run nothing verified that those three flags reached anything at all: deleting
 // every one of them from EncoderConfig.internal() left the suite green.

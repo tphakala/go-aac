@@ -11,6 +11,7 @@ import (
 
 	"github.com/tphakala/go-aac/internal/coder"
 	"github.com/tphakala/go-aac/internal/enc"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // encodeADTSPlanar runs the encoder over planar src and returns an ADTS
@@ -183,7 +184,7 @@ func windowSeqSCE(t *testing.T, frames [][]byte) []int {
 // off, bitexact) on more than 99% of frames, and EIGHT_SHORT must
 // actually trigger on the transient material.
 func TestWindowSequenceVsC(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	for _, tc := range []struct {
 		name string
 		src  []float32
@@ -269,7 +270,7 @@ func TestWindowSequenceVsC(t *testing.T) {
 // 20000, which lifted tonal mono from 70.89 dB and castanets mono from
 // 60.64 dB.
 func TestPhase2DecodeGate(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	cast := synthCastanets(44100*6, 44100, castanetsLeftSeed, castanetsLeftClick)
 	tonal := synthTonal(44100*5, 44100)
 	castR := synthCastanets(44100*5, 44100, castanetsRightSeed, castanetsRightClick)
@@ -287,10 +288,10 @@ func TestPhase2DecodeGate(t *testing.T) {
 			ch := len(tc.src)
 			stream := encodeADTSPlanar(t,
 				enc.Config{SampleRate: 44100, Bitrate: 128000, Channels: ch, Coder: enc.CoderFast, DisableTNS: true, DisablePNS: true}, tc.src)
-			dec := ffmpegDecodeStream(t, ffmpeg, stream, ch)
+			dec := oracletest.DecodeStream(t, ffmpeg, stream, ch, EncoderDelay)
 			worst := math.Inf(1)
 			for c := range ch {
-				p := psnr(tc.src[c], dec[c], EncoderDelay)
+				p := oracletest.PSNRPrefix(tc.src[c], dec[c], EncoderDelay)
 				t.Logf("%s ch %d PSNR %.2f dB", tc.name, c, p)
 				worst = math.Min(worst, p)
 			}

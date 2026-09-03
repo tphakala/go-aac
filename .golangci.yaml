@@ -70,6 +70,13 @@ linters:
             - "!**/internal/dsp/lpc.go"
             - "!**/internal/tables/cbrt_fixed.go"
             - "!**/tools/**"
+            # internal/oracletest is test-support scaffolding imported only from
+            # _test.go files: it scores PSNR (golden verification) and packs
+            # f32le bytes via math.Float32bits/Float32frombits for the ffmpeg
+            # oracle. That is the documented "tests may use math" case, but it is
+            # a regular .go file so !$test does not match it. Same rationale as
+            # the tools/ exemption: not on the encoder's per-frame numeric surface.
+            - "!**/internal/oracletest/**"
           deny:
             - pkg: "math$"
               desc: import internal/fmath instead (fmath boundary, docs/go-design.md)

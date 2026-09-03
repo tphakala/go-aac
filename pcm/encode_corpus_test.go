@@ -3,71 +3,17 @@ package pcm
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	aac "github.com/tphakala/go-aac"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
-
-// oracleTimeout bounds one ffmpeg or afconvert subprocess so a hung oracle
-// surfaces as a named failure rather than the test binary's own ten-minute
-// timeout panic. This mirrors the root package's runOracle bound; the pcm
-// oracles were the bare exec.Command twins it did not cover.
-const oracleTimeout = 2 * time.Minute
-
-// oracleCtx returns a context that expires after oracleTimeout, for bounding an
-// oracle subprocess. The cancel is registered with t.Cleanup so a caller can
-// pass the context straight to exec.CommandContext without carrying a defer.
-func oracleCtx(t *testing.T) context.Context {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), oracleTimeout)
-	t.Cleanup(cancel)
-	return ctx
-}
-
-// ffmpegBin returns the pinned FFmpeg CLI from GOAAC_FFMPEG, skipping the
-// test when it is not set.
-func ffmpegBin(t *testing.T) string {
-	t.Helper()
-	p := os.Getenv("GOAAC_FFMPEG")
-	if p == "" {
-		skipOrFatalOracle(t, "pinned ffmpeg not set; set GOAAC_FFMPEG")
-	}
-	fi, err := os.Stat(p)
-	if err != nil {
-		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is not usable: %v", p, err))
-	}
-	// Stat succeeds on a directory, and the easy mistake is pointing at the
-	// FFmpeg build tree instead of the binary inside it. Catch it here, where
-	// the message can say so, rather than at the first exec.
-	if fi.IsDir() {
-		skipOrFatalOracle(t, fmt.Sprintf("GOAAC_FFMPEG=%q is a directory, not the ffmpeg binary", p))
-	}
-	return p
-}
-
-// skipOrFatalOracle skips the calling test, or fails it when
-// GOAAC_REQUIRE_ORACLE is set to a non-empty value.
-//
-// Skipping is right for a contributor without the pinned FFmpeg. It is wrong
-// for a runner whose whole job is to run the gate: a mistyped path or a broken
-// build would skip every differential test and still print ok. The CI oracle
-// job sets GOAAC_REQUIRE_ORACLE so that an absent oracle reports red.
-func skipOrFatalOracle(t *testing.T, msg string) {
-	t.Helper()
-	if os.Getenv("GOAAC_REQUIRE_ORACLE") != "" {
-		t.Fatalf("GOAAC_REQUIRE_ORACLE is set, so a missing oracle is a failure: %s", msg)
-	}
-	t.Skip(msg)
-}
 
 // corpusWAV locates a corpus recording under GOAAC_CORPUS_DIR, skipping the
 // test when it is not set.
@@ -157,55 +103,6 @@ func srcFloats(data []byte, channels, bits int) [][]float32 {
 	return out
 }
 
-// ffmpegDecode decodes an ADTS file to raw f32le with the pinned ffmpeg,
-// failing on any decoder diagnostic.
-func ffmpegDecode(t *testing.T, ffmpeg, path string, channels int) [][]float32 {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(oracleCtx(t), ffmpeg, "-v", "error", "-i", path, "-f", "f32le", "-c:a", "pcm_f32le", "-")
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("ffmpeg decode failed: %v\n%s", err, stderr.String())
-	}
-	if stderr.Len() > 0 {
-		t.Fatalf("ffmpeg -v error reported diagnostics:\n%s", stderr.String())
-	}
-	raw := stdout.Bytes()
-	n := len(raw) / 4 / channels
-	out := make([][]float32, channels)
-	for c := range out {
-		out[c] = make([]float32, n)
-	}
-	for i := range n {
-		for c := range channels {
-			out[c][i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[(i*channels+c)*4:]))
-		}
-	}
-	return out
-}
-
-// psnr computes 10*log10(1/MSE) against full scale 1.0 between src and
-// dec[delay:]. delay drops the encoder priming (aac.EncoderDelay samples).
-// The gapless caveat: ADTS cannot signal encoder delay, so decoders emit the
-// priming.
-func psnr(src, dec []float32, delay int) float64 {
-	if len(dec) < delay+len(src) {
-		// Truncated decode: fail any PSNR floor rather than score a prefix as
-		// perfect. A stream that decodes short must not satisfy the gates.
-		return math.Inf(-1)
-	}
-	var mse float64
-	for i := range src {
-		d := float64(src[i]) - float64(dec[delay+i])
-		mse += d * d
-	}
-	if mse == 0 {
-		return math.Inf(1)
-	}
-	return 10 * math.Log10(1/(mse/float64(len(src))))
-}
-
 // oddChunkReader hands out data in fixed odd-sized chunks, forcing
 // io.Copy-style consumers through the partial-sample buffering path.
 type oddChunkReader struct {
@@ -231,7 +128,7 @@ func (r *oddChunkReader) Read(p []byte) (int, error) {
 // calls it, and streaming io.Copy with a 7919-byte buffer (which never
 // divides the sample stride), asserting both produce identical bytes.
 func TestBirdNETGoIntegration(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	cases := []struct {
 		wav     string
 		bitrate int
@@ -277,13 +174,13 @@ func TestBirdNETGoIntegration(t *testing.T) {
 			}
 
 			// Gate leg 1: pinned ffmpeg decodes with zero diagnostics.
-			dec := ffmpegDecode(t, ffmpeg, adts, channels)
+			dec := oracletest.DecodeFile(t, ffmpeg, adts, channels, 0)
 
 			// Gate leg 2: PSNR against the source at the Phase 3 baseline,
 			// dropping the encoder priming (aac.EncoderDelay samples).
 			src := srcFloats(data, channels, bits)
 			for c := range channels {
-				p := psnr(src[c], dec[c], aac.EncoderDelay)
+				p := oracletest.PSNRStrict(src[c], dec[c], aac.EncoderDelay)
 				t.Logf("%s ch%d: %.2f dB (%d bytes, %.1f kbps)", tc.wav, c, p,
 					oneShot.Len(), float64(oneShot.Len())*8*float64(rate)/float64(len(src[c]))/1000)
 				if p < tc.floorDB {
@@ -299,7 +196,7 @@ func TestBirdNETGoIntegration(t *testing.T) {
 			if _, err := exec.LookPath("afconvert"); err != nil {
 				t.Skip("afconvert not available")
 			}
-			out, err := exec.CommandContext(oracleCtx(t), "afconvert", "-f", "WAVE", "-d", "LEI16", aacIn,
+			out, err := exec.CommandContext(oracletest.Ctx(t), "afconvert", "-f", "WAVE", "-d", "LEI16", aacIn,
 				filepath.Join(dir, "apple.wav")).CombinedOutput()
 			if err != nil {
 				t.Fatalf("afconvert rejected the stream: %v\n%s", err, out)
