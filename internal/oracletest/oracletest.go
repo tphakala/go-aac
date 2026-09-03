@@ -206,6 +206,15 @@ func PSNRPrefix(src, dec []float32, delay int) float64 {
 		mse += d * d
 		n++
 	}
+	if n == 0 {
+		// No sample scored (delay at or past the end of dec, or src empty).
+		// Fail any floor deterministically instead of dividing by zero and
+		// returning a NaN that a `<` comparison silently passes. Unreachable
+		// through the decode helpers, whose minSamples floor guarantees dec is
+		// longer than delay, but PSNRPrefix is exported so it is guarded here
+		// too, matching PSNRStrict's -Inf on a decode too short to score.
+		return math.Inf(-1)
+	}
 	mse /= float64(n)
 	if mse == 0 {
 		return math.Inf(1)
