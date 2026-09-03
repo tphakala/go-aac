@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 package dsp
 
-import "math"
+import (
+	"math"
+
+	"github.com/tphakala/go-aac/internal/fmath"
+)
 
 // MaxLPCOrder mirrors MAX_LPC_ORDER (libavcodec/lpc.h @ d09d5afc3a).
 const MaxLPCOrder = 32
@@ -15,6 +19,11 @@ const MaxLPCOrder = 32
 // which is the same product in the same order as the C's x[i]*x[i-j], but lets
 // the compiler prove both indices: len(rem) <= len(x), so the loop body carries
 // no bounds check at all (verified with -d=ssa/check_bce/debug=1).
+//
+// The product carries a float64() barrier so gc does not fuse it into an FMADDD
+// on arm64: the C reference is -ffp-contract=off, and the float64 autoc values
+// feed TNS coefficients that are later cast to float32, so a fused sub-ulp drift
+// is a latent architecture split (issue #79).
 func Autocorr(x []float64, maxLag int, out []float64) {
 	out = out[:maxLag+1]
 	for j := range maxLag + 1 {
@@ -22,7 +31,7 @@ func Autocorr(x []float64, maxLag int, out []float64) {
 		if j <= len(x) {
 			rem := x[j:]
 			for i, xi := range rem {
-				sum += xi * x[i]
+				sum += float64(xi * x[i]) // no FMA
 			}
 		}
 		out[j] = sum
@@ -35,6 +44,10 @@ func Autocorr(x []float64, maxLag int, out []float64) {
 //
 // errOut may be nil, as it is in the C (compute_ref_coefs is called with a
 // NULL error pointer from ff_lpc_calc_ref_coefs).
+//
+// Every multiply-add carries a float64() barrier so gc does not fuse it into an
+// FMADDD on arm64, for the same reason as Autocorr: these values become TNS
+// coefficients cast to float32, and the C reference is -ffp-contract=off (#79).
 func ComputeRefCoefs(autoc []float64, maxOrder int, ref, errOut []float64) {
 	if maxOrder > MaxLPCOrder {
 		panic("dsp: maxOrder exceeds MaxLPCOrder")
@@ -50,21 +63,21 @@ func ComputeRefCoefs(autoc []float64, maxOrder int, ref, errOut []float64) {
 		den = 1
 	}
 	ref[0] = -gen1[0] / den
-	err += gen1[0] * ref[0]
+	err += float64(gen1[0] * ref[0]) // no FMA
 	if errOut != nil {
 		errOut[0] = err
 	}
 	for i := 1; i < maxOrder; i++ {
 		for j := range maxOrder - i {
-			gen1[j] = gen1[j+1] + ref[i-1]*gen0[j]
-			gen0[j] = gen1[j+1]*ref[i-1] + gen0[j]
+			gen1[j] = gen1[j+1] + float64(ref[i-1]*gen0[j]) // no FMA
+			gen0[j] = float64(gen1[j+1]*ref[i-1]) + gen0[j] // no FMA
 		}
 		den = err
 		if den == 0 {
 			den = 1
 		}
 		ref[i] = -gen1[0] / den
-		err += gen1[0] * ref[i]
+		err += float64(gen1[0] * ref[i]) // no FMA
 		if errOut != nil {
 			errOut[i] = err
 		}
@@ -107,7 +120,7 @@ func CalcRefCoefs(samples []float32, order int, ref []float64, applyWindow bool,
 	for i := 0; i <= n/2; i++ {
 		w := 1.0
 		if applyWindow {
-			w = 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(n-1))
+			w = 0.5 - float64(0.5*fmath.Cos(2*math.Pi*float64(i)/float64(n-1))) // no FMA
 		}
 		scratch[i] = w * float64(samples[i])
 		scratch[n-1-i] = w * float64(samples[n-1-i])
