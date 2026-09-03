@@ -3,15 +3,14 @@ package pcm
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	aac "github.com/tphakala/go-aac"
+	"github.com/tphakala/go-aac/internal/oracletest"
 )
 
 // TestCutoffParityVsC proves the Config.Cutoff plumbing end to end: the
@@ -20,29 +19,23 @@ import (
 // 0.5 dB PSNR). A wrong cutoff wiring (ignored, clamped, off by a band)
 // shifts the coded bandwidth and blows the size delta immediately.
 func TestCutoffParityVsC(t *testing.T) {
-	ffmpeg := ffmpegBin(t)
+	ffmpeg := oracletest.FFmpegBin(t)
 	data, rate, channels, bits := wavPCM(t, corpusWAV(t, "tawnyowl.wav"))
 	src := srcFloats(data, channels, bits)
 	dir := t.TempDir()
 
-	// Feed the C encoder the identical float samples the Go encoder sees.
+	// Feed the C encoder the identical float samples the Go encoder sees. The
+	// mono encode below reads channel 0, so hand the writer just that channel.
 	rawPath := filepath.Join(dir, "src.f32")
-	rawF32 := make([]byte, len(src[0])*4)
-	for i, v := range src[0] {
-		binary.LittleEndian.PutUint32(rawF32[i*4:], math.Float32bits(v))
-	}
-	if err := os.WriteFile(rawPath, rawF32, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	oracletest.WriteRawF32(t, rawPath, src[:1])
 
 	const cutoff = 12000
 	cPath := filepath.Join(dir, "c.adts")
-	cmd := exec.CommandContext(oracleCtx(t), ffmpeg, "-v", "error", "-y", "-f", "f32le",
+	if out := oracletest.Run(t, ffmpeg, "-v", "error", "-y", "-f", "f32le",
 		"-ar", fmt.Sprint(rate), "-ac", "1", "-i", rawPath,
 		"-c:a", "aac", "-cutoff", fmt.Sprint(cutoff), "-b:a", "128000",
-		"-flags", "+bitexact", "-f", "adts", cPath)
-	if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
-		t.Fatalf("C encode: %v %q", err, out)
+		"-flags", "+bitexact", "-f", "adts", cPath); len(out) > 0 {
+		t.Fatalf("C encode wrote %d bytes to stdout", len(out))
 	}
 	cStream, err := os.ReadFile(cPath)
 	if err != nil {
@@ -60,8 +53,8 @@ func TestCutoffParityVsC(t *testing.T) {
 	}
 
 	sizeDelta := 100 * (float64(goBuf.Len()) - float64(len(cStream))) / float64(len(cStream))
-	pGo := psnr(src[0], ffmpegDecode(t, ffmpeg, goPath, 1)[0], aac.EncoderDelay)
-	pC := psnr(src[0], ffmpegDecode(t, ffmpeg, cPath, 1)[0], aac.EncoderDelay)
+	pGo := oracletest.PSNRStrict(src[0], oracletest.DecodeFile(t, ffmpeg, goPath, 1, 0)[0], aac.EncoderDelay)
+	pC := oracletest.PSNRStrict(src[0], oracletest.DecodeFile(t, ffmpeg, cPath, 1, 0)[0], aac.EncoderDelay)
 	t.Logf("cutoff %d: Go %d B %.2f dB, C %d B %.2f dB (size %+.2f%%, PSNR %+.2f dB)",
 		cutoff, goBuf.Len(), pGo, len(cStream), pC, sizeDelta, pGo-pC)
 	if math.Abs(sizeDelta) > 3.0 {
