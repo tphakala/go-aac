@@ -21,13 +21,13 @@ import (
 //
 // float64 FMA (FMADDD, ...) is guarded separately, in the determinism-critical
 // paths, by TestNoFloat64FMAInDeterministicMath below: the vendored
-// transcendentals (internal/fmath), the MDCT (internal/mdct) and the TNS LPC
-// (internal/dsp) are barriered float64-FMA-free. The float64 FMAs left
-// unguarded are all in internal/window (the KBD and KBDFixed scale
-// accumulations and the SineFixed rescale), each an exact power-of-two multiply
-// and therefore value-neutral. This runs by cross-compilation, so it checks
-// arm64 from any host; it is skipped under -short and when the go toolchain is
-// not on PATH.
+// transcendentals (internal/fmath), the MDCT (internal/mdct), the TNS LPC
+// (internal/dsp) and the psy ATH curve (internal/psy) are barriered
+// float64-FMA-free. The float64 FMAs left unguarded are all in internal/window
+// (the KBD and KBDFixed scale accumulations and the SineFixed rescale), each an
+// exact power-of-two multiply and therefore value-neutral. This runs by
+// cross-compilation, so it checks arm64 from any host; it is skipped under
+// -short and when the go toolchain is not on PATH.
 //
 // This scans the default (SIMD, !noasm) build. The *_noasm.go scalar kernel
 // fallbacks are not built here; their float32 FMA is instead backstopped by
@@ -96,26 +96,27 @@ func TestNoFloat32FMAContraction(t *testing.T) {
 // determinism-critical float64 paths must contain no compiler-emitted float64
 // fused multiply-add (FMADDD/FMSUBD/FNMADDD/FNMSUBD) on arm64. These are the
 // vendored transcendentals (internal/fmath), the MDCT init and transform
-// (internal/mdct), and the TNS autocorrelation and Levinson recursion
-// (internal/dsp). Every such site is barriered so it matches the
-// -ffp-contract=off C reference and stays identical on arm64 and amd64; a
-// contracted float64 a*b+c would reintroduce the sub-ULP GOARCH split that issue
-// #59 removed, because these float64 values become spectral coefficients and TNS
-// coefficients that are then cast to float32. Every site carries an explicit
-// float64() rounding barrier.
+// (internal/mdct), the TNS autocorrelation and Levinson recursion (internal/dsp),
+// and the psychoacoustic ATH curve (internal/psy). Every such site is barriered
+// so it matches the -ffp-contract=off C reference and stays identical on arm64
+// and amd64; a contracted float64 a*b+c would reintroduce the sub-ULP GOARCH
+// split that issue #59 removed, because these float64 values become spectral
+// coefficients, TNS coefficients and psy thresholds that are then cast to
+// float32. Every site carries an explicit float64() rounding barrier.
 //
-// These three packages are the encoder's determinism-critical float64 surface.
-// Per the depguard rule (.golangci.yaml) the coder and psy packages cannot
-// import math, so every encoder transcendental routes through internal/fmath;
-// the other math-importing packages are internal/window (only the value-neutral
-// FMAs below) and the decoder-only internal/tx and internal/tables/cbrt_fixed.go.
-// So building fmath, mdct and dsp (mdct and dsp both import fmath) is fast and
-// needs no allow-list. The deliberately unguarded float64 FMAs are all in
-// internal/window (the KBD and KBDFixed scale accumulations and the SineFixed
-// rescale), each an exact power-of-two multiply and therefore value-neutral; the
-// encoder window tables are pinned cross-arch by internal/window's
-// TestWindowTablesGolden and the decoder's int32 tables by internal/dec's
-// TestIMDCTDump.
+// These four packages are the encoder's determinism-critical float64 surface:
+// internal/coder and internal/enc are float64-FMA-free (their per-frame
+// arithmetic is float32, guarded by TestNoFloat32FMAContraction above), and per
+// the depguard rule (.golangci.yaml) coder and psy cannot import math, so their
+// transcendentals route through internal/fmath. The only other math-importing
+// packages are internal/window (whose float64 FMAs are the value-neutral
+// power-of-two multiplies below) and the decoder-only internal/tx and
+// internal/tables/cbrt_fixed.go, so this build needs no allow-list. The
+// deliberately unguarded float64 FMAs are all in internal/window (the KBD and
+// KBDFixed scale accumulations and the SineFixed rescale), each an exact
+// power-of-two multiply and therefore value-neutral; the encoder window tables
+// are pinned cross-arch by internal/window's TestWindowTablesGolden and the
+// decoder's int32 tables by internal/dec's TestIMDCTDump.
 func TestNoFloat64FMAInDeterministicMath(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping toolchain build under -short")
@@ -131,7 +132,7 @@ func TestNoFloat64FMAInDeterministicMath(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, goBin, "build",
 		"-gcflags=github.com/tphakala/go-aac/...=-S",
-		"./internal/fmath/", "./internal/mdct/", "./internal/dsp/")
+		"./internal/fmath/", "./internal/mdct/", "./internal/dsp/", "./internal/psy/")
 	cmd.Env = append(cmd.Environ(),
 		"GOARCH=arm64", "GOOS=linux", "CGO_ENABLED=0", "GOCACHE="+t.TempDir())
 	out, err := cmd.CombinedOutput()
@@ -148,7 +149,8 @@ func TestNoFloat64FMAInDeterministicMath(t *testing.T) {
 	inScope := func(sym string) bool {
 		return strings.Contains(sym, "internal/fmath.") ||
 			strings.Contains(sym, "internal/mdct.") ||
-			strings.Contains(sym, "internal/dsp.")
+			strings.Contains(sym, "internal/dsp.") ||
+			strings.Contains(sym, "internal/psy.")
 	}
 
 	var fn string

@@ -85,3 +85,76 @@ func TestPortableDeterminismGolden(t *testing.T) {
 		}
 	}
 }
+
+// monoKey maps a float64 to a uint64 that increases monotonically with the
+// value, so the unsigned difference of two keys is the number of representable
+// float64 steps between them (a sign-aware ULP distance across zero).
+func monoKey(x float64) uint64 {
+	b := math.Float64bits(x)
+	if b>>63 == 1 {
+		return ^b
+	}
+	return b | (1 << 63)
+}
+
+func ulpDist(a, b float64) uint64 {
+	ka, kb := monoKey(a), monoKey(b)
+	if ka > kb {
+		ka, kb = kb, ka
+	}
+	return kb - ka
+}
+
+// TestPortableAccuracy checks every vendored transcendental against the Go
+// standard library over a representative input sweep, within a small ULP
+// tolerance. TestPortableDeterminismGolden above only pins the current
+// implementation's output, so a mistyped coefficient would hash stably and pass;
+// this is the guard that catches a transcription error, because a wrong constant
+// moves the result far more than the intended sub-ULP barrier and FMA
+// difference. The tolerance is a few dozen ULP, not zero, because on arm64 the
+// stdlib fuses its polynomials and runs per-arch assembly while the vendored
+// copy does neither: the two legitimately differ, and the widest gap over this
+// sweep is log2 near x=1 (a result close to zero, where the asm-vs-portable log
+// difference is amplified), which reaches about 19 ULP. amd64 stays within 2
+// ULP. 32 clears that while remaining orders of magnitude below the thousands of
+// ULP any coefficient transcription error would move the result.
+func TestPortableAccuracy(t *testing.T) {
+	const tolULP = 32
+	var maxSeen uint64
+	check := func(name string, x, got, want float64) {
+		switch {
+		case math.IsNaN(want):
+			if !math.IsNaN(got) {
+				t.Errorf("%s(%v) = %v, want NaN", name, x, got)
+			}
+		case math.IsInf(want, 0):
+			if got != want {
+				t.Errorf("%s(%v) = %v, want %v", name, x, got, want)
+			}
+		default:
+			d := ulpDist(got, want)
+			if d > maxSeen {
+				maxSeen = d
+			}
+			if d > tolULP {
+				t.Errorf("%s(%v) = %v, want %v (%d ULP > %d)", name, x, got, want, d, tolULP)
+			}
+		}
+	}
+	for i := range 4001 {
+		x := float64(i)/100.0 - 20.0 // [-20, 20]
+		check("atan", x, atan(x), math.Atan(x))
+		check("sin", x, sin(x), math.Sin(x))
+		check("cos", x, cos(x), math.Cos(x))
+		check("exp2", x, exp2(x), math.Exp2(x))
+		check("exp", x, exp(x), math.Exp(x))
+		if x > 0 {
+			check("log", x, log(x), math.Log(x))
+			check("log2", x, log2(x), math.Log2(x))
+			for _, y := range []float64{0.75, -1.3, 3, 10} {
+				check("pow", x, pow(x, y), math.Pow(x, y))
+			}
+		}
+	}
+	t.Logf("max ULP distance from stdlib over the sweep: %d (tolerance %d)", maxSeen, tolULP)
+}
