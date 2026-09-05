@@ -104,7 +104,7 @@ func (rf readerFunc) Read(p []byte) (int, error) { return rf(p) }
 // a wrapped writer that errors rather than over-emitting, so a success returning
 // more than the cap would be a broken-enforcement regression.
 func FuzzDecodeInterleaved(f *testing.F) {
-	for _, name := range []string{streamMono, streamStereo, "crc_s48"} {
+	for _, name := range []string{streamMono, streamStereo, streamCRC} {
 		if fr := firstFrame(name); fr != nil {
 			f.Add(fr)
 		}

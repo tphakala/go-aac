@@ -22,6 +22,7 @@ const decoderTestdata = "testdata/decoder"
 const (
 	streamMono   = "sine_m8_24k"
 	streamStereo = "tonal_s48_128k"
+	streamCRC    = "crc_s48"
 )
 
 // decoderRefs loads the sha256 manifest (one "hex  name.adts" line per stream).

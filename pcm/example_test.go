@@ -4,6 +4,7 @@ package pcm_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 
@@ -122,4 +123,66 @@ func ExampleNewEncoder() {
 	}
 	fmt.Println(countADTSFrames(out.Bytes()), "ADTS frames")
 	// Output: 101 ADTS frames
+}
+
+// ExampleNewRawDecoder decodes raw AAC-LC access units one at a time, the
+// push-style OnFrame(au) shape a network transport (RTSP, HLS) drives, where
+// the AudioSpecificConfig arrives out of band. Here the units are produced by a
+// FrameEncoder to keep the example self-contained; in a real ingest they come
+// from the transport. Passing pcm[:0] reuses one buffer, so steady-state decode
+// does not allocate.
+func ExampleNewRawDecoder() {
+	cfg := aacpcm.Config{SampleRate: 48000, BitDepth: 16, Channels: 1, Bitrate: 96000}
+	fe, err := aacpcm.NewFrameEncoder(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	asc := fe.AudioSpecificConfig() // delivered to the decoder out of band
+	var aus [][]byte
+	collect := func(au []byte, _ int) error {
+		aus = append(aus, bytes.Clone(au))
+		return nil
+	}
+	if err := fe.EncodeInterleaved(make([]byte, 48000*2), collect); err != nil {
+		log.Fatal(err)
+	}
+	if err := fe.Flush(collect); err != nil {
+		log.Fatal(err)
+	}
+
+	d, err := aacpcm.NewRawDecoder(asc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var pcm []byte
+	total := 0
+	for _, au := range aus { // the OnFrame(au) callback body
+		var n int
+		if pcm, n, err = d.DecodeFrame(pcm[:0], au); err != nil {
+			log.Fatal(err)
+		}
+		total += n
+	}
+	fmt.Printf("%d Hz, %d ch, %d samples/ch decoded\n", d.SampleRate(), d.Channels(), total)
+	// Output: 48000 Hz, 1 ch, 49152 samples/ch decoded
+}
+
+// ExampleParseASC probes an AudioSpecificConfig before decoding, so an
+// unsupported codec is named up front instead of failing at the first frame.
+func ExampleParseASC() {
+	// A stereo AAC-LC config (an MP4 esds DecoderSpecificInfo).
+	info, err := aacpcm.ParseASC([]byte{0x12, 0x10})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("AAC-LC=%v, %d Hz, %d ch, SBR=%v PS=%v\n",
+		info.ObjectType == 2, info.SampleRate, info.Channels, info.SBR, info.PS)
+
+	// HE-AAC (SBR) surfaces as a typed error the caller can branch on.
+	if _, err := aacpcm.ParseASC([]byte{0x2b, 0x92, 0x08, 0x00}); errors.Is(err, aacpcm.ErrUnsupportedSBR) {
+		fmt.Println("second stream is HE-AAC, unsupported")
+	}
+	// Output:
+	// AAC-LC=true, 44100 Hz, 2 ch, SBR=false PS=false
+	// second stream is HE-AAC, unsupported
 }
