@@ -59,6 +59,37 @@ Not implemented: HE-AAC (SBR/PS), xHE-AAC, LATM, ER/LD/ELD profiles,
 multichannel beyond stereo, VBR (`global_quality`), MP4 muxing (the pure-Go
 [go-m4a](https://github.com/tphakala/go-m4a) is the container companion).
 
+## Audio quality
+
+go-aac is competitive with ffmpeg's built-in AAC-LC encoder: it matches or beats
+it on waveform fidelity and PEAQ, while ViSQOL can favour either depending on the
+material. ffmpeg's native `aac` is a modest reference; a fully tuned encoder such
+as libfdk_aac would be a stronger opponent.
+
+Quality is measured objectively, not by ear: real 48 kHz recordings are encoded,
+decoded, and scored against the original.
+
+- ViSQOL (MOS, 1-5, higher is better): predicted listening-test score; 4.5+ is
+  effectively transparent.
+- PEAQ (ITU-R BS.1387 ODG, 0 to -4, closer to 0 is better): audibility of
+  impairment; 0 imperceptible, -1 audible but not annoying, -2 slightly
+  annoying.
+- SNR and spectral distance (dB): raw fidelity. A high SNR alone does not
+  guarantee good perceived quality.
+
+Snapshot (2026-09-05), 128 kbps, decoded output scored against the source:
+
+| Clip              | go-aac ViSQOL / PEAQ | ffmpeg aac ViSQOL / PEAQ |
+|-------------------|----------------------|--------------------------|
+| nature soundscape | 4.64 / -0.01         | 4.63 / -0.37             |
+| pygmy owl         | 4.20 / -0.05         | 4.49 / -0.10             |
+
+On the soundscape go-aac is transparent while ffmpeg shows a small penalty; on
+the owl clip ffmpeg scores higher on ViSQOL while go-aac keeps better PEAQ and
+raw fidelity. Net: comparable and material-dependent. This is a small
+directional sample, not a full benchmark; results vary with material and
+bitrate. A corpus-based regression gate is planned (#109).
+
 ## Approach
 
 go-aac is a faithful port of FFmpeg's AAC encoder and fixed-point decoder at a
