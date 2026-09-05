@@ -491,6 +491,43 @@ func TestFrameDecoderADTSConfigChange(t *testing.T) {
 	}
 }
 
+// TestFrameDecoderADTSNoElementFirstFrameNoStateLeak guards the "does not
+// consume decoder state" contract for the trickiest case: a first ADTS access
+// unit whose header is valid but whose payload carries no audio element (a bare
+// TypeEnd). The header alone configures the internal decoder, so rejecting the
+// unit must roll that back, otherwise a later valid frame with a different
+// configuration would be wrongly rejected as a mid-stream change.
+func TestFrameDecoderADTSNoElementFirstFrameNoStateLeak(t *testing.T) {
+	noElem, err := aac.AppendADTSHeader(nil, 44100, 2, 1) // valid stereo header, 1-byte payload
+	if err != nil {
+		t.Fatal(err)
+	}
+	noElem = append(noElem, 0xe0) // raw_data_block: first 3 bits are TypeEnd, no audio element
+
+	d := NewADTSDecoder()
+	if _, _, err := d.DecodeFrame(nil, noElem); !errors.Is(err, ErrCorruptStream) {
+		t.Fatalf("no-element first frame err = %v, want ErrCorruptStream", err)
+	}
+	if sr, ch := d.SampleRate(), d.Channels(); sr != 0 || ch != 0 {
+		t.Errorf("after rejected no-element first frame SampleRate=%d Channels=%d, want 0/0 (no state consumed)", sr, ch)
+	}
+
+	// A later valid frame with a DIFFERENT supported configuration must decode
+	// cleanly, proving the rejected frame's header config did not stick.
+	b := Config{SampleRate: 48000, BitDepth: 16, Channels: 1, Bitrate: 96000}
+	frameB := splitADTSFrames(t, encodeADTS(t, b, testPCM(2500, b)))[0]
+	out, n, err := d.DecodeFrame(nil, frameB)
+	if err != nil {
+		t.Fatalf("valid frame after rejected no-element frame: %v", err)
+	}
+	if n != aac.FrameSize || len(out) != aac.FrameSize*b.Channels*2 {
+		t.Errorf("recovered frame: n=%d bytes=%d, want %d/%d", n, len(out), aac.FrameSize, aac.FrameSize*b.Channels*2)
+	}
+	if sr, ch := d.SampleRate(), d.Channels(); sr != b.SampleRate || ch != b.Channels {
+		t.Errorf("after valid frame SampleRate=%d Channels=%d, want %d/%d", sr, ch, b.SampleRate, b.Channels)
+	}
+}
+
 // TestFrameDecoderZeroValue checks that a zero-value FrameDecoder is inert
 // rather than a nil-pointer panic: every method reports the uninitialised state,
 // so a caller that skipped the constructor gets an error, not a crash.

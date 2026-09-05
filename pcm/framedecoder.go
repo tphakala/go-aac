@@ -76,13 +76,21 @@ func NewRawDecoder(asc []byte) (*FrameDecoder, error) {
 // package sentinels (ErrCorruptStream for malformed input, including an access
 // unit that carries no audio; ErrUnsupported and its SBR/PS refinements for a
 // valid stream outside the AAC-LC scope), testable with errors.Is. A decode
-// error does not consume decoder state: the failed unit leaves the overlap-add
-// and PNS state untouched, so a caller may skip a corrupt access unit and decode
-// the next, or Reset for a clean session.
+// error does not consume decoder state: the failed unit leaves the
+// configuration, overlap-add and PNS state untouched, so a caller may skip a
+// corrupt access unit and decode the next, or Reset for a clean session.
+// Calling DecodeFrame on a zero-value or nil FrameDecoder (one not built by a
+// constructor) instead returns a non-sentinel initialisation error, which does
+// not match those sentinels via errors.Is.
 func (d *FrameDecoder) DecodeFrame(dst, au []byte) (out []byte, samples int, err error) {
 	if d == nil || d.dec == nil {
 		return dst, 0, errNotInitialised
 	}
+	// Whether the decoder already knew its configuration before this call. An
+	// ADTS decoder learns it from a frame's header inside AppendS16, before the
+	// audio elements are parsed, so a first frame that turns out to carry no
+	// audio still leaves the decoder configured unless the rejection rolls back.
+	configured := d.dec.Channels() != 0
 	out, samples, err = d.dec.AppendS16(dst, au)
 	if err != nil {
 		return dst, 0, mapErr(err)
@@ -94,6 +102,15 @@ func (d *FrameDecoder) DecodeFrame(dst, au []byte) (out []byte, samples int, err
 	// AAC-LC audio frame omits its SCE/CPE. Guarding here rather than in the
 	// shared internal decoder keeps the io.Reader Decoder's behaviour unchanged.
 	if len(out)-len(dst) != samples*d.dec.Channels()*2 {
+		// A first ADTS frame that carried no audio still configured the decoder
+		// from its header. Undo that so the rejected unit consumes no state, as
+		// the doc promises: otherwise a later valid frame with a different
+		// configuration would be wrongly rejected as a mid-stream change. A raw
+		// decoder's configuration comes from the ASC, not the frame, so it is
+		// never rolled back.
+		if !d.raw && !configured {
+			d.dec.ResetADTS()
+		}
 		return dst, 0, fmt.Errorf("%w: no audio channel element in access unit", ErrCorruptStream)
 	}
 	return out, samples, nil
@@ -152,8 +169,9 @@ type ASCInfo struct {
 // object type, sample rate and channel count with a nil error. For a
 // configuration this decoder cannot handle it returns a typed error, testable
 // with errors.Is: ErrUnsupportedSBR for HE-AAC, ErrUnsupportedPS for HE-AACv2,
-// and ErrUnsupported for a non-LC object type or a channel config above two;
-// malformed input returns ErrCorruptStream. On an ErrUnsupported result the
+// and ErrUnsupported for a non-LC object type, a channel config above two, a
+// PCE-configured stream (channel config zero), or 960-sample frames; malformed
+// or truncated input returns ErrCorruptStream. On an ErrUnsupported result the
 // returned ASCInfo is populated on a best-effort basis, so a caller may inspect
 // the object type and the SBR/PS flags of a rejected config. On ErrCorruptStream
 // it is the zero value, because a truncated header parses only overread garbage
