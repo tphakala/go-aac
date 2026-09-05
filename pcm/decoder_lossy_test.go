@@ -57,7 +57,7 @@ func falseSyncGarble(t *testing.T) []byte {
 // and emitted garbage PCM.
 func TestResyncSkipsFalseSyncword(t *testing.T) {
 	garble := falseSyncGarble(t)
-	for _, name := range []string{streamMono, streamStereo, "crc_s48"} {
+	for _, name := range []string{streamMono, streamStereo, streamCRC} {
 		t.Run(name, func(t *testing.T) {
 			data := loadStream(t, name)
 			offs := frameOffsets(t, data)
