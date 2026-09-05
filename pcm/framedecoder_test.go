@@ -528,6 +528,31 @@ func TestFrameDecoderADTSNoElementFirstFrameNoStateLeak(t *testing.T) {
 	}
 }
 
+// TestFrameDecoderADTSPayloadErrorFirstFrameNoStateLeak is the decode-error
+// sibling of the no-element case: a first ADTS access unit with a valid header
+// but a payload that overreads still runs configure() from the header before it
+// errors, so the error path must roll the config back too. Otherwise a later
+// valid frame with a different configuration would be wrongly rejected.
+func TestFrameDecoderADTSPayloadErrorFirstFrameNoStateLeak(t *testing.T) {
+	a := Config{SampleRate: 44100, BitDepth: 16, Channels: 2, Bitrate: 128000}
+	full := splitADTSFrames(t, encodeADTS(t, a, testPCM(2500, a)))[0]
+	truncated := full[:adtsHeaderLen+4] // valid header, payload cut short so it overreads
+
+	d := NewADTSDecoder()
+	if _, _, err := d.DecodeFrame(nil, truncated); !errors.Is(err, ErrCorruptStream) {
+		t.Fatalf("truncated first ADTS frame err = %v, want ErrCorruptStream", err)
+	}
+	if sr, ch := d.SampleRate(), d.Channels(); sr != 0 || ch != 0 {
+		t.Errorf("after rejected truncated first frame SampleRate=%d Channels=%d, want 0/0 (no state consumed)", sr, ch)
+	}
+
+	b := Config{SampleRate: 48000, BitDepth: 16, Channels: 1, Bitrate: 96000}
+	frameB := splitADTSFrames(t, encodeADTS(t, b, testPCM(2500, b)))[0]
+	if _, n, err := d.DecodeFrame(nil, frameB); err != nil || n != aac.FrameSize {
+		t.Errorf("valid frame after rejected truncated frame: n=%d err=%v, want %d and nil", n, err, aac.FrameSize)
+	}
+}
+
 // TestFrameDecoderZeroValue checks that a zero-value FrameDecoder is inert
 // rather than a nil-pointer panic: every method reports the uninitialised state,
 // so a caller that skipped the constructor gets an error, not a crash.

@@ -93,6 +93,13 @@ func (d *FrameDecoder) DecodeFrame(dst, au []byte) (out []byte, samples int, err
 	configured := d.dec.Channels() != 0
 	out, samples, err = d.dec.AppendS16(dst, au)
 	if err != nil {
+		// A first ADTS frame configures the decoder from its header before its
+		// payload is decoded, so a payload error would otherwise leave that
+		// header-derived config latched, for the same reason the no-element path
+		// below rolls back. Undo it so a failed first unit consumes no state.
+		if !d.raw && !configured {
+			d.dec.ResetADTS()
+		}
 		return dst, 0, mapErr(err)
 	}
 	// An access unit with no audio channel element (only DSE/FIL, or a bare
