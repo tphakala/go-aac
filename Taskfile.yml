@@ -61,6 +61,26 @@ tasks:
     cmds:
       - go test -bench=. -benchmem -benchtime={{.BENCH_TIME}} ./...
 
+  quality:
+    desc: 'Render the go-aac-versus-ffmpeg objective quality report (needs ffmpeg; pass args after --, e.g. task quality -- -coders nmr)'
+    cmds:
+      - go run ./tools/quality {{.CLI_ARGS}}
+
+  quality:gate:
+    desc: Run the objective quality regression gate against the committed baseline (no external tool)
+    cmds:
+      - GOAAC_QUALITY_BASELINE=1 go test ./tools/quality/ -run TestQualityBaseline -v -timeout 10m
+
+  quality:gate:update:
+    desc: Refresh the committed quality baseline (a deliberate, reviewed action; no external tool)
+    cmds:
+      - UPDATE_QUALITY_BASELINE=1 go test ./tools/quality/ -run TestQualityBaseline -v -timeout 10m
+
+  quality:smoke:
+    desc: Run the oracle-gated quality harness tests (set GOAAC_FFMPEG to the pinned ffmpeg first)
+    cmds:
+      - GOAAC_REQUIRE_ORACLE=1 go test ./tools/quality/ -run 'TestQualityHarness|TestCrossCheck|TestRunGridOrderAndReclaim' -v -timeout 10m
+
   vet:
     desc: Run go vet for amd64 and arm64, all three tag settings
     cmds:
@@ -97,7 +117,7 @@ tasks:
       - git config core.hooksPath .githooks
 
   check:
-    desc: Full local gate (build, vet, lint, race tests, noasm race tests, non-race tests)
+    desc: Full local gate (build, vet, lint, race tests, noasm race tests, non-race tests, quality gate)
     cmds:
       - task: build
       - task: vet
@@ -107,3 +127,6 @@ tasks:
       # a noasm-only or race-only failure is otherwise invisible until push.
       - task: test:noasm
       - task: test:norace
+      # CI runs the objective quality regression gate; run it locally too so a
+      # regression is caught before push, not only in CI. It needs no external tool.
+      - task: quality:gate

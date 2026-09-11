@@ -77,6 +77,12 @@ linters:
             # a regular .go file so !$test does not match it. Same rationale as
             # the tools/ exemption: not on the encoder's per-frame numeric surface.
             - "!**/internal/oracletest/**"
+            # internal/quality is the objective-metric core behind the offline
+            # tools/quality harness: FFT, SNR/LSD, alignment, and the synthetic
+            # corpus generators (math.Sin). Same rationale as tools/ and
+            # oracletest: it measures the encoder, it is never on the per-frame
+            # encode path, and it is a regular .go file so !$test does not match.
+            - "!**/internal/quality/**"
           deny:
             - pkg: "math$"
               desc: import internal/fmath instead (fmath boundary, docs/go-design.md)
@@ -122,6 +128,14 @@ linters:
         text: singleCaseSwitch
         linters:
           - gocritic
+      # The tools/quality tests are table-driven over the CLI flag names
+      # (-rates, -coders, -bitrates) and the coder-name strings (nmr), which
+      # recur across cases by nature. Hoisting those test-only literals into
+      # constants reads worse than the literals in a test table, and they are
+      # not shared production magic values, so goconst is waived for these tests.
+      - path: tools/quality/.*_test\.go
+        linters:
+          - goconst
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

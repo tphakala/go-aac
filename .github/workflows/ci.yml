@@ -117,7 +117,18 @@ jobs:
       # oversight: the oracle job can fail while
       # building FFmpeg, for reasons that have nothing to do with the suite, and
       # this step is what keeps a non-race regression visible when it does.
+      # GOAAC_QUALITY_BASELINE turns on the objective quality regression gate
+      # (TestQualityBaseline in tools/quality): go-aac encode -> pcm decode ->
+      # cross-correlation align -> score against the source, compared with the
+      # committed tools/quality/testdata/baseline.json. It needs no external
+      # binary (ffmpeg is only the human-facing reference in `task quality`), so
+      # it runs on every OS here; the encoder is bit-exact cross-arch and the
+      # metrics differ only at ~1e-13, far under the dB tolerances. It sits on
+      # the non-race pass rather than the race one because 36 encodes across
+      # three coders add minutes under -race for no extra signal.
       - name: Run tests (no race)
+        env:
+          GOAAC_QUALITY_BASELINE: '1'
         run: go test ./...
 
   lint:
@@ -383,3 +394,29 @@ jobs:
           SIMD_DISABLE=all go test -count=1 -v -run TestSIMDDisableEnvIsHonoured ./ |
             tee "$RUNNER_TEMP/simd-guard.log"
           grep -q '^--- PASS: TestSIMDDisableEnvIsHonoured' "$RUNNER_TEMP/simd-guard.log"
+
+      # Render the human-facing go-aac-versus-ffmpeg quality report against the
+      # pinned oracle and upload it. This is the external-reference view issue
+      # #109 asks for; the committed baseline gate in the test job is what fails
+      # CI on a regression, so this step fails the job only on a setup error or a
+      # failed case (exit 1 or 2), never on a quality number. 128 kbps is left
+      # out of the grid because bird-chirps under the twoloop coder cannot
+      # converge the rate loop at exactly that budget and errors by design.
+      - name: Render the quality report against the pinned ffmpeg
+        run: |
+          set -euo pipefail
+          go run ./tools/quality \
+            -ffmpeg "$HOME/ffmpeg-oracle/ffmpeg" \
+            -rates 44100,48000 -bitrates 64,192 -coders nmr,twoloop,fast \
+            -seconds 2 \
+            -out "$RUNNER_TEMP/quality/report.md" \
+            -json "$RUNNER_TEMP/quality/report.json"
+
+      - name: Upload the quality report
+        # Upload even when the render step failed, so its partial diagnostic
+        # report is still available as an artifact.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report
+          path: ${{ runner.temp }}/quality/
