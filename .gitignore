@@ -58,3 +58,9 @@ tools/corder/corder
 # ELF reached main this way once already.
 /wav2aac
 tools/wav2aac/wav2aac
+
+# quality report harness: the default report output dir and any built binary.
+# The committed baseline lives under tools/quality/testdata/ and is tracked.
+tools/quality/out/
+tools/quality/quality
+/quality

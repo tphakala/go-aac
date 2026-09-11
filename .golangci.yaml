@@ -77,11 +77,24 @@ linters:
             # a regular .go file so !$test does not match it. Same rationale as
             # the tools/ exemption: not on the encoder's per-frame numeric surface.
             - "!**/internal/oracletest/**"
+            # internal/quality is the objective-metric core behind the offline
+            # tools/quality harness: FFT, SNR/LSD, alignment, and the synthetic
+            # corpus generators (math.Sin). Same rationale as tools/ and
+            # oracletest: it measures the encoder, it is never on the per-frame
+            # encode path, and it is a regular .go file so !$test does not match.
+            - "!**/internal/quality/**"
           deny:
             - pkg: "math$"
               desc: import internal/fmath instead (fmath boundary, docs/go-design.md)
     gocognit:
       min-complexity: 50
+    goconst:
+      # Test data repeats short strings by nature (CLI flag names, coder names,
+      # fixture literals across table-driven cases); those are not shared
+      # production magic values, and counting them package-wide flags the
+      # production definitions that use the same string. Count non-test files
+      # only, so goconst still guards real production duplication.
+      ignore-tests: true
     gocritic:
       # gocritic auto-enables the ruleguard check when settings.ruleguard.rules
       # is set; the rules/*.go matchers carry the //go:build ruleguard tag so

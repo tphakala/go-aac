@@ -88,7 +88,18 @@ On the soundscape go-aac is transparent while ffmpeg shows a small penalty; on
 the owl clip ffmpeg scores higher on ViSQOL while go-aac keeps better PEAQ and
 raw fidelity. Net: comparable and material-dependent. This is a small
 directional sample, not a full benchmark; results vary with material and
-bitrate. A corpus-based regression gate is planned (#109).
+bitrate.
+
+A corpus-based quality gate guards against regressions. `task quality:gate`
+re-measures the encoder on a deterministic synthetic corpus (encode, decode
+with go-aac's own decoder, align by cross-correlation, score against the
+source) and fails when SNR, band-limited SNR, segmental SNR, log-spectral
+distance, or pre-echo drifts past a tolerance from a committed baseline, or the
+encoder's alignment delay changes; it needs no external tool and runs in CI on
+every platform. `task quality` renders
+the full go-aac-versus-ffmpeg (native `aac`, and `libfdk_aac` when the build
+has it) comparison report, per program, bitrate, and coder, with optional
+ViSQOL and PEAQ columns when those binaries are present.
 
 ## Approach
 
