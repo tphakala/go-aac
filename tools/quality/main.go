@@ -236,12 +236,23 @@ type caseJob struct {
 	ref  [][]float64
 }
 
+// caseCeilingKbps is the AAC buffer-model bitrate ceiling for one case: 6144
+// bits per channel per 1024-sample frame, as a whole-stream kbps. Unlike the
+// global bitrateCeilingKbps (which assumes the maximum 2 channels at 48 kHz),
+// this scales with the case's own channel count and sample rate, so a mono or
+// lower-rate case has a lower ceiling. A target above it is clamped by both
+// encoders, so the reported bitrate would mislabel the case.
+func caseCeilingKbps(channels, sampleRate int) int {
+	return 6144 * channels * sampleRate / 1024 / 1000
+}
+
 // buildJobs expands the (rate, program, bitrate, coder) grid into the dispatch
 // list, generating and quantizing each program's reference once per sample
 // rate and reusing it across bitrates and coders. Rates a program cannot
-// serve, and empty programs, are logged and dropped here so the job list holds
-// only real cases. It checks ctx before each reference generation so a Ctrl-C
-// during this phase stops promptly instead of building out the whole grid.
+// serve, empty programs, and bitrates above the case's per-channel buffer-model
+// ceiling are logged and dropped here so the job list holds only real cases. It
+// checks ctx before each reference generation so a Ctrl-C during this phase
+// stops promptly instead of building out the whole grid.
 func buildJobs(ctx context.Context, o *options, errw io.Writer) []caseJob {
 	var jobs []caseJob
 	for _, sr := range o.rates {
@@ -261,7 +272,15 @@ func buildJobs(ctx context.Context, o *options, errw io.Writer) []caseJob {
 				logf(errw, "skip: %s is empty at %d Hz\n", p.Name, sr)
 				continue
 			}
+			// Per-case buffer-model ceiling: the global parseFlags check assumes
+			// the maximum 2ch/48kHz, so a mono or lower-rate case can still carry
+			// a bitrate both encoders would clamp, which would mislabel the row.
+			ceil := caseCeilingKbps(p.Channels, sr)
 			for _, kbps := range o.bitrates {
+				if kbps > ceil {
+					logf(errw, "skip: %s at %d Hz %d kbps exceeds the %d ch buffer-model ceiling of %d kbps\n", p.Name, sr, kbps, p.Channels, ceil)
+					continue
+				}
 				for _, coder := range o.coders {
 					jobs = append(jobs, caseJob{
 						idx:  len(jobs) + 1,
@@ -516,6 +535,16 @@ func selectPrograms(filter, corpus string, rates []int) ([]quality.Program, erro
 	}
 	if len(progs) == 0 {
 		return nil, fmt.Errorf("no programs selected (corpus %q has no usable WAV files)", corpus)
+	}
+	// Reject a name collision: a corpus file whose basename equals a selected
+	// synthetic program (or another corpus file) would produce two report rows
+	// with the same Program name, which the tables cannot tell apart.
+	seenName := make(map[string]bool, len(progs))
+	for _, p := range progs {
+		if seenName[p.Name] {
+			return nil, fmt.Errorf("duplicate program name %q (a corpus file collides with a selected program or another corpus file)", p.Name)
+		}
+		seenName[p.Name] = true
 	}
 	return progs, nil
 }

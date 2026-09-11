@@ -92,6 +92,29 @@ func TestPackS16LE(t *testing.T) {
 	}
 }
 
+// TestPackS16LERejectsBadShapes: an invalid channel shape returns nil rather
+// than packing a wrong layout or panicking on a short channel. WriteWAV16
+// validates before calling PackS16LE, so this defends PackS16LE's direct
+// callers. The "first channel longer" ragged case is the one that indexes past
+// a short channel without the guard, so run every case under a recover that
+// turns a panic into a clear failure.
+func TestPackS16LERejectsBadShapes(t *testing.T) {
+	mustNilNoPanic := func(name string, ch [][]float64) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("PackS16LE(%s) panicked: %v; the invalid-shape guard is missing", name, r)
+			}
+		}()
+		if got := PackS16LE(ch); got != nil {
+			t.Errorf("PackS16LE(%s) = %v, want nil", name, got)
+		}
+	}
+	mustNilNoPanic("no channels", nil)
+	mustNilNoPanic("ragged, first longer", [][]float64{{0, 0}, {0}})
+	mustNilNoPanic("ragged, second longer", [][]float64{{0}, {0, 0}})
+	mustNilNoPanic("three channels", [][]float64{{0}, {0}, {0}})
+}
+
 // buildWAV assembles a RIFF/WAVE file from a fmt body and raw sample data, with
 // an extra LIST chunk of odd length between them so the reader's
 // word-alignment skip and unknown-chunk handling are both exercised.
@@ -179,6 +202,16 @@ func TestReadWAV24Extensible(t *testing.T) {
 		if ch[0][i] != w || ch[1][i] != 0 {
 			t.Fatalf("sample %d = (%v, %v), want (%v, 0)", i, ch[0][i], ch[1][i], w)
 		}
+	}
+}
+
+// TestReadWAVRejectsPartialFrame: a data chunk whose byte count is not a whole
+// number of frames is rejected rather than silently truncated, so a corrupt or
+// truncated WAV cannot masquerade as a shorter valid one. Three bytes is 1.5
+// frames of 16-bit mono.
+func TestReadWAVRejectsPartialFrame(t *testing.T) {
+	if _, _, err := ReadWAV(bytes.NewReader(buildWAV(fmtBody(wavFormatPCM, 1, 44100, 16), []byte{1, 2, 3}))); err == nil {
+		t.Fatal("a data chunk that is not a whole number of frames must error")
 	}
 }
 

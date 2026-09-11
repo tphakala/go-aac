@@ -12,7 +12,7 @@ import (
 
 func TestParseInts(t *testing.T) {
 	got, err := parseInts(" 64, 128 ,192")
-	if err != nil || len(got) != 3 || got[0] != 64 || got[2] != 192 {
+	if err != nil || len(got) != 3 || got[0] != 64 || got[1] != 128 || got[2] != 192 {
 		t.Fatalf("parseInts: %v, %v", got, err)
 	}
 	if _, err := parseInts(","); err == nil {
@@ -33,7 +33,7 @@ func TestSelectPrograms(t *testing.T) {
 		t.Fatalf("all programs: %d, %v", len(all), err)
 	}
 	two, err := selectPrograms("sweep, multitone", "", testRates)
-	if err != nil || len(two) != 2 || two[0].Name != "sweep" {
+	if err != nil || len(two) != 2 || two[0].Name != "sweep" || two[1].Name != "multitone" {
 		t.Fatalf("filtered programs: %+v, %v", two, err)
 	}
 	if _, err := selectPrograms("nope", "", testRates); err == nil {
@@ -41,6 +41,31 @@ func TestSelectPrograms(t *testing.T) {
 	}
 	if _, err := selectPrograms("", "/nonexistent-corpus-dir", testRates); err == nil {
 		t.Fatal("an unreadable corpus directory must error")
+	}
+}
+
+// TestSelectProgramsDuplicateName: a corpus WAV whose basename equals a selected
+// synthetic program name would produce two report rows with the same Program
+// name that the tables cannot tell apart, so selectPrograms rejects it.
+func TestSelectProgramsDuplicateName(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWAVFile(filepath.Join(dir, "multitone.wav"), 48000, [][]float64{{0.1, -0.1}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selectPrograms("multitone", dir, testRates); err == nil {
+		t.Fatal("a corpus file named after a selected synthetic program must error on the name collision")
+	}
+	// A distinct corpus name must NOT be rejected: renaming the same file to
+	// "clip" resolves the collision and the selection succeeds.
+	if err := os.Rename(filepath.Join(dir, "multitone.wav"), filepath.Join(dir, "clip.wav")); err != nil {
+		t.Fatal(err)
+	}
+	progs, err := selectPrograms("multitone", dir, testRates)
+	if err != nil {
+		t.Fatalf("a distinct corpus name must not be rejected: %v", err)
+	}
+	if len(progs) != 2 {
+		t.Fatalf("got %d programs %v, want the synthetic multitone plus the clip corpus file", len(progs), names(progs))
 	}
 }
 

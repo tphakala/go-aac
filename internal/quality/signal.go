@@ -55,9 +55,14 @@ func MultiTone(sampleRate, nSamples int, chPhase, peak float64) []float64 {
 // loud LCG-noise burst (amplitude 0.8, seed 0xC1CC7A31) every
 // periodFrames*FrameSize samples, each burst burstFrames*FrameSize samples
 // long, repeating for the whole duration, the first burst at sample 0. It
-// drives an encoder's attack detector repeatedly.
+// drives an encoder's attack detector repeatedly. A non-positive periodFrames
+// or burstFrames is a degenerate cadence and yields silence, rather than
+// looping forever (period 0) or indexing out of range (negative period).
 func ClickTrain(nSamples, periodFrames, burstFrames int) []float64 {
 	x := make([]float64, nSamples)
+	if periodFrames <= 0 || burstFrames <= 0 {
+		return x
+	}
 	seed := uint64(0xC1CC7A31)
 	period := periodFrames * FrameSize
 	burst := burstFrames * FrameSize
@@ -76,19 +81,23 @@ func ClickTrain(nSamples, periodFrames, burstFrames int) []float64 {
 // shape is what a sub-block energy-ratio attack detector actually fires on: a
 // click merely summed onto a loud tone never clears the ratio. The first
 // burst starts one period in, a true mid-stream onset rather than a
-// stream-start frame.
+// stream-start frame. A non-positive periodFrames or burstFrames is a
+// degenerate cadence and returns the clamped tone with no bursts, rather than
+// indexing out of range (period 0 starts the gap loop at a negative index).
 func ToneClick(sampleRate, nSamples, periodFrames, burstFrames int) []float64 {
 	tone := MultiTone(sampleRate, nSamples, 0, 0.5)
-	seed := uint64(0x5A17C1CC)
-	period := periodFrames * FrameSize
-	burst := burstFrames * FrameSize
-	const gap = FrameSize / 2
-	for start := period; start+burst <= nSamples; start += period {
-		for i := start - gap; i < start; i++ {
-			tone[i] = 0
-		}
-		for i := range burst {
-			tone[start+i] = LCGSigned(&seed) * 0.9
+	if periodFrames > 0 && burstFrames > 0 {
+		seed := uint64(0x5A17C1CC)
+		period := periodFrames * FrameSize
+		burst := burstFrames * FrameSize
+		const gap = FrameSize / 2
+		for start := period; start+burst <= nSamples; start += period {
+			for i := start - gap; i < start; i++ {
+				tone[i] = 0
+			}
+			for i := range burst {
+				tone[start+i] = LCGSigned(&seed) * 0.9
+			}
 		}
 	}
 	x := make([]float64, nSamples)

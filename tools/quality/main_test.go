@@ -160,6 +160,42 @@ func TestBuildJobsSkipsRateMismatchAndEmpty(t *testing.T) {
 	}
 }
 
+// TestBuildJobsSkipsOverCeiling: a bitrate above a case's own per-channel
+// buffer-model ceiling is dropped (both encoders would clamp it, mislabeling
+// the requested bitrate), while the same bitrate under a wider ceiling (more
+// channels) is kept. 300 kbps is over the mono 44100 ceiling of 264 but under
+// the stereo 44100 ceiling of 529, so exactly the mono case drops.
+func TestBuildJobsSkipsOverCeiling(t *testing.T) {
+	o := &options{
+		rates:    []int{44100},
+		bitrates: []int{300},
+		coders:   []aac.Coder{aac.CoderNMR},
+		programs: []quality.Program{
+			{Name: "mono", Channels: 1, Gen: func(_, n int) [][]float64 { return [][]float64{make([]float64, n)} }},
+			{Name: "stereo", Channels: 2, Gen: func(_, n int) [][]float64 { return [][]float64{make([]float64, n), make([]float64, n)} }},
+		},
+		seconds: 1,
+	}
+	jobs := buildJobs(t.Context(), o, io.Discard)
+	if len(jobs) != 1 {
+		t.Fatalf("built %d jobs, want 1 (the mono case exceeds its ceiling and drops; stereo is kept)", len(jobs))
+	}
+	if jobs[0].spec.Program.Name != "stereo" || jobs[0].idx != 1 {
+		t.Fatalf("kept job = {%s idx %d}, want {stereo idx 1} with indices dense over dispatched jobs", jobs[0].spec.Program.Name, jobs[0].idx)
+	}
+}
+
+// TestCaseCeilingKbps pins the per-case ceiling against hand-computed values and
+// against the global constant at its maximum operating point.
+func TestCaseCeilingKbps(t *testing.T) {
+	if got := caseCeilingKbps(1, 44100); got != 264 {
+		t.Errorf("mono 44100 ceiling = %d, want 264", got)
+	}
+	if got := caseCeilingKbps(2, 48000); got != bitrateCeilingKbps {
+		t.Errorf("2ch 48000 ceiling = %d, want the global %d", got, bitrateCeilingKbps)
+	}
+}
+
 // TestParseFlagsRejects covers the setup-time validation: each row names an
 // input that must be rejected before any case runs.
 func TestParseFlagsRejects(t *testing.T) {

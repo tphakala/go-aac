@@ -30,6 +30,22 @@ type tools struct {
 // without a flag), then "ffmpeg" on PATH. visqol and peaq resolve from their
 // flag or default name on PATH. Absence is not an error here; callers decide.
 func detectTools(ctx context.Context, ffmpegFlag, visqolFlag, peaqFlag string) tools {
+	// abs makes a resolved binary path absolute. runTool sets cmd.Dir to a
+	// per-case work subdir, so a relative path (a relative -ffmpeg, or a
+	// relative GOAAC_FFMPEG such as "build/ffmpeg") would otherwise be resolved
+	// against that subdir at exec time and fail. Empty stays empty, so an absent
+	// tool is not turned into the current directory; an absolute path is
+	// unchanged (filepath.Abs is idempotent on one). filepath.Abs cannot error
+	// for a non-empty string, but keep the resolved value if it somehow does.
+	abs := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		if a, err := filepath.Abs(p); err == nil {
+			return a
+		}
+		return p
+	}
 	look := func(flag, def string) string {
 		name := def
 		if flag != "" {
@@ -39,7 +55,7 @@ func detectTools(ctx context.Context, ffmpegFlag, visqolFlag, peaqFlag string) t
 		if err != nil {
 			return ""
 		}
-		return p
+		return abs(p)
 	}
 	ffmpeg := ""
 	switch {
@@ -49,7 +65,7 @@ func detectTools(ctx context.Context, ffmpegFlag, visqolFlag, peaqFlag string) t
 		// The oracle convention points GOAAC_FFMPEG at the binary itself, so it
 		// is used as given rather than looked up on PATH.
 		if p := os.Getenv("GOAAC_FFMPEG"); usableFile(p) {
-			ffmpeg = p
+			ffmpeg = abs(p)
 		}
 	default:
 		ffmpeg = look("", "ffmpeg")

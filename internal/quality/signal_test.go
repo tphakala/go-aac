@@ -1,6 +1,9 @@
 package quality
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestLCGSequencePinned pins the generator's state transition and first two
 // outputs against values captured independently, so any change to the
@@ -66,5 +69,44 @@ func TestClickTrainCadence(t *testing.T) {
 		if silenceE != 0 {
 			t.Fatalf("period at %d: the gap between bursts is not silent (energy %v)", start, silenceE)
 		}
+	}
+}
+
+// TestClickTrainDegenerateCadence: a periodFrames of 0 must yield silence, not
+// loop forever. Run in a goroutine so a regression that loops is caught by the
+// timeout here as an explicit failure rather than hanging the whole suite. The
+// 4096-sample buffer is larger than one burst (ClickBurstFrames*FrameSize =
+// 1024), so without the guard the period-0 loop would spin forever; the guarded
+// path returns in microseconds, far under the 10s timeout.
+func TestClickTrainDegenerateCadence(t *testing.T) {
+	done := make(chan []float64, 1)
+	go func() { done <- ClickTrain(4096, 0, ClickBurstFrames) }()
+	select {
+	case x := <-done:
+		if len(x) != 4096 {
+			t.Fatalf("returned %d samples, want 4096", len(x))
+		}
+		for i, v := range x {
+			if v != 0 {
+				t.Fatalf("degenerate cadence must be silent; x[%d] = %v", i, v)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("ClickTrain with periodFrames=0 did not return within 10s: the degenerate-cadence guard is missing")
+	}
+}
+
+// TestToneClickDegenerateCadence: a periodFrames of 0 must return the clamped
+// tone without indexing out of range (period 0 starts the gap loop at a
+// negative index). Recover so a regression is a clear failure, not a crash.
+func TestToneClickDegenerateCadence(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ToneClick with periodFrames=0 panicked: %v; the degenerate-cadence guard is missing", r)
+		}
+	}()
+	x := ToneClick(44100, 4096, 0, ClickBurstFrames)
+	if len(x) != 4096 {
+		t.Fatalf("returned %d samples, want 4096", len(x))
 	}
 }

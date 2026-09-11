@@ -167,7 +167,12 @@ func fmtMetric(v float64) string {
 // a corpus file name, and a pipe or a newline there would split the cell or
 // forge a whole row.
 func cell(s string) string {
-	return strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ").Replace(s)
+	// Escape backslash FIRST so a literal backslash before a pipe cannot forge a
+	// live cell: strings.NewReplacer applies the longest match at each position
+	// and does not re-scan its own output, so ordering "\\" -> "\\\\" ahead of
+	// "|" -> "\\|" doubles the backslash and then escapes the pipe (a raw "\|"
+	// would otherwise render as an escaped backslash followed by a live pipe).
+	return strings.NewReplacer("\\", "\\\\", "|", "\\|", "\n", " ", "\r", " ").Replace(s)
 }
 
 // writeMarkdown renders the full report: header, one table per sample rate

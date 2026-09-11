@@ -219,6 +219,12 @@ func TestCellEscapes(t *testing.T) {
 	if got := cell("row\ninject"); got != "row inject" {
 		t.Fatalf("cell with a newline = %q", got)
 	}
+	// A literal backslash before a pipe must not forge a live cell: the backslash
+	// is doubled and the pipe escaped, so no raw pipe survives. Input a\|b, want
+	// a\\\|b (three backslashes then an escaped pipe).
+	if got := cell(`a\|b`); got != `a\\\|b` {
+		t.Fatalf("cell(%q) = %q, want %q", `a\|b`, got, `a\\\|b`)
+	}
 }
 
 func TestFmtMetric(t *testing.T) {

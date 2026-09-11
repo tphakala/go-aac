@@ -108,3 +108,32 @@ func TestDetectToolsGOAACFFmpegUsable(t *testing.T) {
 		t.Fatal("a fake ffmpeg that lists no encoders must not report libfdk present")
 	}
 }
+
+// TestDetectToolsRelativeGOAACFFmpegAbsolute: a RELATIVE GOAAC_FFMPEG is made
+// absolute, so runTool (which sets cmd.Dir to a per-case work subdir) does not
+// resolve it against that subdir at exec time and fail.
+func TestDetectToolsRelativeGOAACFFmpegAbsolute(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary is POSIX-only")
+	}
+	bin := filepath.Join(t.TempDir(), "fakeffmpeg")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(cwd, bin)
+	if err != nil || filepath.IsAbs(rel) {
+		t.Skipf("temp dir %q has no relative form from cwd %q (rel=%q, err=%v)", bin, cwd, rel, err)
+	}
+	t.Setenv("GOAAC_FFMPEG", rel)
+	tl := detectTools(t.Context(), "", "", "")
+	if !filepath.IsAbs(tl.ffmpeg) {
+		t.Fatalf("ffmpeg = %q, want an absolute path resolved from the relative GOAAC_FFMPEG %q", tl.ffmpeg, rel)
+	}
+	if tl.ffmpeg != bin {
+		t.Fatalf("ffmpeg = %q, want the absolute form %q of the relative GOAAC_FFMPEG", tl.ffmpeg, bin)
+	}
+}

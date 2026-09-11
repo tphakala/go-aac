@@ -48,13 +48,22 @@ func sampleToInt16(v float64) int16 {
 // interleaved little-endian signed 16-bit PCM, the byte layout pcm.Config with
 // BitDepth 16 consumes. It uses the same sampleToInt16 rounding WriteWAV16
 // uses, so the go-aac encode path and a WAV written for the perceptual tools
-// start from the identical quantized samples.
+// start from the identical quantized samples. It returns nil for an invalid
+// shape (no channels, more than two, or channels of differing length) rather
+// than packing a wrong layout or panicking on a short channel.
 func PackS16LE(ch [][]float64) []byte {
-	if len(ch) == 0 {
+	if len(ch) == 0 || len(ch) > 2 {
 		return nil
 	}
 	n := len(ch[0])
 	nch := len(ch)
+	// Equal-length channels only, matching the documented shape; a ragged input
+	// would otherwise index past a short channel and panic.
+	for _, c := range ch {
+		if len(c) != n {
+			return nil
+		}
+	}
 	buf := make([]byte, n*nch*2)
 	for i := range n {
 		for c := range nch {
@@ -161,6 +170,14 @@ func ReadWAV(r io.Reader) (sampleRate int, ch [][]float64, err error) {
 	conv, bytesPer, err := wavSampleReader(format, bits)
 	if err != nil {
 		return 0, nil, err
+	}
+	// The data chunk must hold a whole number of frames. Dropping a trailing
+	// partial frame silently would mask a truncated or corrupt file. This is
+	// distinct from the truncated-final-CHUNK clamp above, which bounds a chunk
+	// whose declared size overruns the file: after that clamp, the resulting
+	// byte count must still divide evenly into bytesPer*nch-byte frames.
+	if len(data)%(bytesPer*nch) != 0 {
+		return 0, nil, fmt.Errorf("quality: data chunk of %d bytes is not a whole number of %d-byte frames", len(data), bytesPer*nch)
 	}
 	frames := len(data) / (bytesPer * nch)
 	ch = make([][]float64, nch)
