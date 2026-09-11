@@ -88,6 +88,13 @@ linters:
               desc: import internal/fmath instead (fmath boundary, docs/go-design.md)
     gocognit:
       min-complexity: 50
+    goconst:
+      # Test data repeats short strings by nature (CLI flag names, coder names,
+      # fixture literals across table-driven cases); those are not shared
+      # production magic values, and counting them package-wide flags the
+      # production definitions that use the same string. Count non-test files
+      # only, so goconst still guards real production duplication.
+      ignore-tests: true
     gocritic:
       # gocritic auto-enables the ruleguard check when settings.ruleguard.rules
       # is set; the rules/*.go matchers carry the //go:build ruleguard tag so
@@ -128,14 +135,6 @@ linters:
         text: singleCaseSwitch
         linters:
           - gocritic
-      # The tools/quality tests are table-driven over the CLI flag names
-      # (-rates, -coders, -bitrates) and the coder-name strings (nmr), which
-      # recur across cases by nature. Hoisting those test-only literals into
-      # constants reads worse than the literals in a test table, and they are
-      # not shared production magic values, so goconst is waived for these tests.
-      - path: tools/quality/.*_test\.go
-        linters:
-          - goconst
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -112,17 +112,26 @@ func parseEncodersForLibFDK(out string) bool {
 	return libfdkEncoderLine.MatchString(out)
 }
 
+// Coder names as ffmpeg's -aac_coder values, also the coder strings in the
+// report and the committed baseline. Single source for coderName and
+// parseCoders so the two cannot drift.
+const (
+	coderNameNMR     = "nmr"
+	coderNameTwoLoop = "twoloop"
+	coderNameFast    = "fast"
+)
+
 // coderName maps an aac.Coder to ffmpeg's -aac_coder value. It panics on an
 // unknown coder, mirroring the oracle harness's cCoderName: an unmapped coder
 // is a programming error, not a runtime condition to paper over.
 func coderName(c aac.Coder) string {
 	switch c {
 	case aac.CoderNMR:
-		return "nmr"
+		return coderNameNMR
 	case aac.CoderTwoLoop:
-		return "twoloop"
+		return coderNameTwoLoop
 	case aac.CoderFast:
-		return "fast"
+		return coderNameFast
 	default:
 		panic(fmt.Sprintf("quality: unknown coder %d", c))
 	}
@@ -131,7 +140,7 @@ func coderName(c aac.Coder) string {
 // parseCoders parses a comma-separated coder list (nmr, twoloop, fast) into a
 // deduplicated slice preserving first-seen order. An unknown name is an error.
 func parseCoders(s string) ([]aac.Coder, error) {
-	byName := map[string]aac.Coder{"nmr": aac.CoderNMR, "twoloop": aac.CoderTwoLoop, "fast": aac.CoderFast}
+	byName := map[string]aac.Coder{coderNameNMR: aac.CoderNMR, coderNameTwoLoop: aac.CoderTwoLoop, coderNameFast: aac.CoderFast}
 	var out []aac.Coder
 	seen := map[aac.Coder]bool{}
 	for part := range strings.SplitSeq(s, ",") {
