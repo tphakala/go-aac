@@ -416,7 +416,7 @@ jobs:
         # Upload even when the render step failed, so its partial diagnostic
         # report is still available as an artifact.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quality-report
           path: ${{ runner.temp }}/quality/
