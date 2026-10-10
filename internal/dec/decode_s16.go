@@ -22,7 +22,9 @@ const frameSamples = 1024
 //
 // On a decode error dst is returned unmodified with a zero sample count and
 // the wrapped error; the caller (pcm.Decoder) decides whether the error ends
-// the stream or is skipped.
+// the stream or is skipped. The decoder's cross-frame state (window history,
+// overlap buffers, PNS) is then as it was before the call, except that a first
+// ADTS frame's header configuration stays latched.
 func (d *Decoder) AppendS16(dst, pkt []byte) (out []byte, samples int, err error) {
 	if err := d.DecodeFrame(pkt); err != nil {
 		return dst, 0, err

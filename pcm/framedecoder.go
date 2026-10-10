@@ -33,7 +33,8 @@ var errNotInitialised = errors.New("go-aac/pcm: uninitialised FrameDecoder; use 
 //
 // A FrameDecoder is not safe for concurrent use, and must not be copied after
 // first use: a copy shares the codec state and the scratch buffers with the
-// original.
+// original. Distinct FrameDecoders share no mutable state, so each may run on
+// its own goroutine.
 type FrameDecoder struct {
 	dec *dec.Decoder
 	asc []byte // retained (cloned) for a raw stream so Reset can re-derive the config; nil for ADTS
@@ -77,8 +78,20 @@ func NewRawDecoder(asc []byte) (*FrameDecoder, error) {
 // unit that carries no audio; ErrUnsupported and its SBR/PS refinements for a
 // valid stream outside the AAC-LC scope), testable with errors.Is. A decode
 // error does not consume decoder state: the failed unit leaves the
-// configuration, overlap-add and PNS state untouched, so a caller may skip a
-// corrupt access unit and decode the next, or Reset for a clean session.
+// configuration, overlap-add, window-shape history and PNS state untouched, so
+// the next valid unit decodes byte-identically to a decoder that never saw the
+// failed one, and a caller may skip a corrupt access unit and decode the next,
+// or Reset for a clean session. A corrupt unit that still parses is decoded as
+// audio and does advance the state. The output recovered after an error is
+// not guaranteed to match what another AAC decoder produces after the same
+// error.
+//
+// For an ADTS decoder, au must hold exactly one ADTS frame. The decoder parses
+// the frame from its header and payload and does not compare aac_frame_length
+// with len(au): trailing bytes are ignored, and a buffer holding several
+// concatenated frames decodes only the first, so split such buffers before
+// calling.
+//
 // Calling DecodeFrame on a zero-value or nil FrameDecoder (one not built by a
 // constructor) instead returns a non-sentinel initialisation error, which does
 // not match those sentinels via errors.Is.
@@ -96,7 +109,9 @@ func (d *FrameDecoder) DecodeFrame(dst, au []byte) (out []byte, samples int, err
 		// A first ADTS frame configures the decoder from its header before its
 		// payload is decoded, so a payload error would otherwise leave that
 		// header-derived config latched, for the same reason the no-element path
-		// below rolls back. Undo it so a failed first unit consumes no state.
+		// below rolls back. Undo it so a failed first unit consumes no state. The
+		// internal decoder restores the payload parse state itself (the window
+		// history); this rollback covers only the header-derived configuration.
 		if !d.raw && !configured {
 			d.dec.ResetADTS()
 		}
@@ -180,7 +195,10 @@ type ASCInfo struct {
 // PCE-configured stream (channel config zero), or 960-sample frames; malformed
 // or truncated input returns ErrCorruptStream. On an ErrUnsupported result the
 // returned ASCInfo is populated on a best-effort basis, so a caller may inspect
-// the object type and the SBR/PS flags of a rejected config. On ErrCorruptStream
+// the object type and the SBR/PS flags of a rejected config. Those fields are the
+// raw parsed values (an explicit sample-rate escape can yield an implausible
+// rate): treat them as untrusted and meaningful only for display, and base a
+// codec decision on ObjectType and the SBR/PS flags alone. On ErrCorruptStream
 // it is the zero value, because a truncated header parses only overread garbage
 // (an empty buffer would otherwise report sample-rate index 0, 96 kHz).
 func ParseASC(asc []byte) (ASCInfo, error) {
