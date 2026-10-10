@@ -101,6 +101,20 @@ the full go-aac-versus-ffmpeg (native `aac`, and `libfdk_aac` when the build
 has it) comparison report, per program, bitrate, and coder, with optional
 ViSQOL and PEAQ columns when those binaries are present.
 
+One case in the full report is expected to fail. Encoding the synthetic
+`bird-chirps` program at 44.1 kHz and 128 kbps with the twoloop coder makes the
+rate control stop moving: lambda pins at its floor while the frame stays at the
+buffer ceiling, so every further pass quantizes identically. FFmpeg's C encoder
+has the same loop with no exit and spins forever on that input (the pinned build
+ignores SIGTERM while it does), which is why a reference run on it needs a hard
+kill. go-aac detects the condition and returns an error (`enc: rate control
+cannot converge at 128000 bps, 44100 Hz`) instead of hanging, so `task quality`
+reports `1 failed` and exits 1 for that case. It is not a quality regression,
+and that configuration is not in the committed gate grid (64 and 192 kbps). The
+other cases in a run over both sample rates, 64 to 192 kbps and all three
+coders completed. Only this one input and configuration is known to reach the
+state; which real signals could reach it has not been characterised.
+
 ## Approach
 
 go-aac is a faithful port of FFmpeg's AAC encoder and fixed-point decoder at a
