@@ -123,7 +123,7 @@
 // # Concurrency
 //
 // An Encoder is not safe for concurrent use; use one per goroutine, and the
-// same holds for a FrameEncoder and a Decoder. The package-level
+// same holds for a FrameEncoder, a FrameDecoder and a Decoder. The package-level
 // EncodeInterleaved function is safe for concurrent use.
 //
 // # SIMD kernels

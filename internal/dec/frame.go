@@ -13,6 +13,14 @@ import (
 // channel elements and listed in Elems. Mirrors the frame path
 // aac_decode_frame_int -> parse_adts_frame_header -> decode_frame_ga of
 // libavcodec/aac/aacdec.c @ d09d5afc3a at the symbol level.
+//
+// On error the per-channel window history is restored to its state before the
+// call, so a failed unit leaves no cross-frame parse state behind: decodeICSInfo
+// shifts WindowSequence and UseKBWindow in place while it parses, and
+// imdctAndWindowing reads index 1 of both as the previous window. The overlap
+// buffers and PNS state are only written by reconstruct, which a failed unit
+// never reaches. The configuration an ADTS decoder latches from its first
+// header is not rolled back here; pcm.FrameDecoder does that.
 func (d *Decoder) DecodeFrame(pkt []byte) error {
 	r := bits.NewReader(pkt)
 	if d.adts {
@@ -45,13 +53,36 @@ func (d *Decoder) DecodeFrame(pkt []byte) error {
 	} else if !d.configured {
 		return fmt.Errorf("%w: decoder not configured", ErrInvalidData)
 	}
-	return d.decodeFrameGA(r)
+	if err := d.decodeFrameGA(r); err != nil {
+		d.restoreWindowHistory()
+		return err
+	}
+	return nil
+}
+
+// restoreWindowHistory puts back the window history decodeFrameGA captured at
+// the start of the failed raw_data_block. If a later tool carries more state
+// across frames, it needs the same treatment; FuzzFrameDecoderRecovery in
+// package pcm is the net for a missed field.
+func (d *Decoder) restoreWindowHistory() {
+	for t := range d.che {
+		for _, che := range d.che[t] {
+			if che == nil {
+				continue
+			}
+			for c := range che.Ch {
+				che.Ch[c].ICS.WindowSequence = che.savedWin[c].seq
+				che.Ch[c].ICS.UseKBWindow = che.savedWin[c].kb
+			}
+		}
+	}
 }
 
 // decodeFrameGA runs the raw_data_block element loop. Mirrors
 // libavcodec/aac/aacdec.c:decode_frame_ga @ d09d5afc3a, restricted to the
 // element types AAC-LC mono/stereo streams can carry; CCE and PCE return
-// ErrUnsupported.
+// ErrUnsupported. It captures each channel's window history before parsing;
+// DecodeFrame restores it on error.
 func (d *Decoder) decodeFrameGA(r *bits.Reader) error {
 	d.Elems = d.Elems[:0]
 	// Clear stale presence left by any earlier frame. Stage 3 of reconstruct
@@ -62,6 +93,10 @@ func (d *Decoder) decodeFrameGA(r *bits.Reader) error {
 		for _, che := range d.che[t] {
 			if che != nil {
 				che.present = false
+				for c := range che.Ch {
+					che.savedWin[c].seq = che.Ch[c].ICS.WindowSequence
+					che.savedWin[c].kb = che.Ch[c].ICS.UseKBWindow
+				}
 			}
 		}
 	}

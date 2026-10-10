@@ -198,7 +198,17 @@ type CPE struct {
 	commonWindow bool
 	msPresent    int
 	MaxSFBSte    int
+
+	// savedWin holds each channel's window history as it was when the current
+	// raw_data_block started parsing. decodeFrameGA fills it and DecodeFrame
+	// restores it when the block fails to parse.
+	savedWin [2]windowHist
 }
+
+// windowHist is one channel's window history: the ICS WindowSequence and
+// UseKBWindow pairs, where index 0 is the current unit and index 1 the previous
+// one. decodeICSInfo shifts them in place and imdctAndWindowing reads index 1.
+type windowHist struct{ seq, kb [2]int }
 
 // Config is the decoder configuration established from the first ADTS
 // header or from an AudioSpecificConfig. Mirrors the fields of

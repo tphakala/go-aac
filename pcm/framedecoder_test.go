@@ -383,16 +383,33 @@ func TestFrameDecoderErrorDoesNotCorruptState(t *testing.T) {
 	if _, _, err := d.DecodeFrame(nil, frames[0]); err != nil {
 		t.Fatalf("first frame: %v", err)
 	}
+	// A reference decoder that never sees a malformed unit. After a unit that
+	// errored, the recovered frame must be byte-identical to the reference's.
+	ref := NewADTSDecoder()
+	if _, _, err := ref.DecodeFrame(nil, frames[0]); err != nil {
+		t.Fatalf("reference first frame: %v", err)
+	}
 	sawError := false
 	for i, m := range malformed {
-		if _, _, err := d.DecodeFrame(nil, m); err != nil {
+		_, _, mErr := d.DecodeFrame(nil, m)
+		if mErr != nil {
 			sawError = true
+		} else if _, _, err := ref.DecodeFrame(nil, m); err != nil {
+			// The unit parsed, so state advanced; keep the reference in step.
+			t.Fatalf("malformed %d: reference rejected a unit the decoder accepted: %v", i, err)
 		}
 		// Whether the malformed unit errored or decoded to garbage, the decoder
 		// must stay usable: a following valid frame decodes to a full frame.
 		out, n, err := d.DecodeFrame(nil, frames[2])
 		if err != nil {
 			t.Fatalf("valid frame after malformed input %d: %v", i, err)
+		}
+		want, _, err := ref.DecodeFrame(nil, frames[2])
+		if err != nil {
+			t.Fatalf("reference frame %d: %v", i, err)
+		}
+		if !bytes.Equal(out, want) {
+			t.Errorf("malformed %d: recovered frame differs from a decoder that never saw the failed unit", i)
 		}
 		if n != aac.FrameSize {
 			t.Errorf("malformed %d: recovered frame reported %d samples, want %d", i, n, aac.FrameSize)
