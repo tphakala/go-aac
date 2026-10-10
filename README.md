@@ -216,7 +216,41 @@ The decoder never panics on malformed input (it returns wrapped
 `ErrUnsupportedPS` naming HE-AAC and HE-AACv2 specifically so a caller can hand
 those off to an external decoder) and runs at zero allocations per frame in
 steady state. Raw access units plus an `AudioSpecificConfig` are opt in via
-`aacpcm.WithRawStream(asc)`.
+`aacpcm.WithRawStream(asc)`. When the whole stream is in memory,
+`aacpcm.DecodeInterleaved(r)` returns all the PCM in one call, and
+`aacpcm.DecodeInterleavedLimit(r, maxBytes)` bounds the allocation for untrusted
+input (`aacpcm.ErrDecodeLimit` when the limit is hit).
+
+Live ingest (RTSP, HLS, HTTP or UDP) delivers access units one at a time, with
+loss and corruption, so there is a frame-level decoder that needs no reader in
+between: `aacpcm.NewADTSDecoder()` for self-describing ADTS frames, or
+`aacpcm.NewRawDecoder(asc)` for bare access units described by an
+AudioSpecificConfig that arrives out of band.
+
+```go
+fd, err := aacpcm.NewRawDecoder(asc) // or aacpcm.NewADTSDecoder()
+if err != nil {                      // ErrUnsupported, ErrUnsupportedSBR or ErrUnsupportedPS, from the ASC
+    return err
+}
+var pcm []byte
+for au := range units {
+    pcm, _, err = fd.DecodeFrame(pcm[:0], au) // samples per channel is always 1024
+    if err != nil {
+        continue // skip a corrupt unit; the next valid one still decodes correctly
+    }
+    play(pcm)
+}
+```
+
+`DecodeFrame` appends interleaved S16 PCM to a caller-owned buffer, decodes
+byte-identically to the reader `Decoder`, and allocates nothing in steady state.
+A failed unit leaves the decoder as it was before the call, so the next valid
+unit decodes exactly as if the bad one had never arrived (use `Reset` to start a
+clean session). A corrupt unit that still parses is decoded as audio and does
+advance the state, as the codec requires. An ADTS `au` must hold exactly one
+frame; the length field is not checked against the buffer. A `FrameDecoder` is
+not safe for concurrent use, but separate instances are independent.
+`aacpcm.ParseASC(asc)` reads an AudioSpecificConfig without building a decoder.
 
 ### aac: the low-level codec
 
