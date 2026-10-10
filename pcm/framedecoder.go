@@ -78,7 +78,7 @@ func NewRawDecoder(asc []byte) (*FrameDecoder, error) {
 // unit that carries no audio; ErrUnsupported and its SBR/PS refinements for a
 // valid stream outside the AAC-LC scope), testable with errors.Is. A decode
 // error does not consume decoder state: the failed unit leaves the
-// configuration, overlap-add, window-shape history and PNS state untouched, so
+// configuration, overlap-add, window history and PNS state untouched, so
 // the next valid unit decodes byte-identically to a decoder that never saw the
 // failed one, and a caller may skip a corrupt access unit and decode the next,
 // or Reset for a clean session. A corrupt unit that still parses is decoded as
