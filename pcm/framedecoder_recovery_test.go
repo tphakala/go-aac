@@ -309,8 +309,8 @@ func TestFrameDecoderADTSSteadyStateAllocs(t *testing.T) {
 }
 
 // TestFrameDecoderIndependentInstancesConcurrent pins that distinct
-// FrameDecoders share no mutable state: eight goroutines, each with its own
-// ADTS and raw decoder, must reproduce the serial result. Run under -race it
+// FrameDecoders share no mutable state: eight goroutines per stream (one ADTS,
+// one raw), each with its own decoder, must reproduce the serial result. Run under -race it
 // catches a shared global; it never shares one decoder across goroutines, which
 // the type forbids.
 func TestFrameDecoderIndependentInstancesConcurrent(t *testing.T) {

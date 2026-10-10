@@ -106,3 +106,58 @@ func TestDecodeFrameErrorRestoresWindowHistory(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeFrameErrorRestoresNonCommonWindowCPE covers a CPE with
+// common_window=0, where each channel runs its own decodeICSInfo and channel 1
+// shifts its history only after channel 0 parsed completely. The frame is cut at
+// every length, so some cuts fail after channel 1's shift; each failing cut must
+// leave the history as it was.
+func TestDecodeFrameErrorRestoresNonCommonWindowCPE(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "goenc_s48_128k.adts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := splitADTSFrames(t, data)
+	k := -1
+	for i, f := range frames {
+		if i >= 2 && f[1]&1 == 1 && int(f[adtsHeaderSize]>>5) == TypeCPE && f[adtsHeaderSize]&1 == 0 {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		t.Fatal("no non-common-window CPE frame in the stream")
+	}
+	failed := 0
+	dst := make([]byte, 0, 1<<14)
+	for n := adtsHeaderSize + 3; n < len(frames[k]); n++ {
+		d := NewADTS()
+		for i, f := range frames[:k] {
+			if dst, _, err = d.AppendS16(dst[:0], f); err != nil {
+				t.Fatalf("frame %d: %v", i, err)
+			}
+		}
+		// Give every channel a history that no parse can reproduce, so a
+		// restore of any one field is observable: a shift of index 0 into
+		// index 1 changes each of them.
+		cpe := d.che[TypeCPE][0]
+		for c := range cpe.Ch {
+			cpe.Ch[c].ICS.WindowSequence = [2]int{c + 1, c + 2}
+			cpe.Ch[c].ICS.UseKBWindow = [2]int{c, 1 - c}
+		}
+		before := windowHistorySnapshot(d)
+		if _, _, err = d.AppendS16(dst[:0], frames[k][:n]); err == nil {
+			continue
+		}
+		failed++
+		after := windowHistorySnapshot(d)
+		for i := range before {
+			if after[i] != before[i] {
+				t.Fatalf("cut at %d: channel %d window history %+v after a failed unit, want %+v", n, i, after[i], before[i])
+			}
+		}
+	}
+	if failed == 0 {
+		t.Fatal("no cut of the frame failed to decode; the error path was not exercised")
+	}
+}
