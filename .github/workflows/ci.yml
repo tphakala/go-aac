@@ -8,9 +8,9 @@ on:
 
 env:
   GO_VERSION: '1.26'
-  # Pinned to match the local toolchain (golangci-lint 2.12.2) so the git
+  # Pinned to match the local toolchain (golangci-lint 2.15.0) so the git
   # hooks, `task lint`, and CI all run the identical linter version.
-  GOLANGCI_LINT_VERSION: 'v2.12.2'
+  GOLANGCI_LINT_VERSION: 'v2.15.0'
   # The differential and PSNR gates are only meaningful against FFmpeg built
   # from this exact commit. A distro ffmpeg predates the NMR coder this port
   # targets and is not a valid oracle. Keep in sync with PROVENANCE.md.
