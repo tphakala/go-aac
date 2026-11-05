@@ -23,6 +23,8 @@ type trellisPath struct {
 // chosen sections. Mirrors aaccoder_trellis.h:codebook_trellis_rate
 // @ d09d5afc3a. The lambda parameter is kept for signature parity with the
 // C coder table; the cost is pure bits.
+//
+//nolint:gocognit // faithful port of one C function, see doc comment
 func (c *Coder) CodebookTrellisRate(pb *bits.Writer, sce *SingleChannelElement,
 	win, groupLen int, _ float32) {
 	ics := &sce.ICS
