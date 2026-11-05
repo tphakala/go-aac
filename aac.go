@@ -23,9 +23,11 @@
 // package has no mutable global state, so any number of encoders run in
 // parallel.
 //
-// By default four hot kernels are SIMD versions, three backed by
-// github.com/tphakala/simd, which picks the widest path the CPU supports and
-// falls back to pure Go, and the band cost in Go assembly in this module.
+// By default the hot kernels are SIMD versions: the NMR trellis and its node
+// cost, AbsPow34, QuantizeBands and the psychoacoustic high-pass filter are
+// backed by github.com/tphakala/simd, which picks the widest path the CPU
+// supports and falls back to pure Go, and the band cost is Go assembly in this
+// module.
 // Building with -tags noasm swaps in their scalar counterparts and links no
 // simd code. The output is byte-identical either way,
 // so the choice only affects speed, and SIMDEnabled reports which set a binary
