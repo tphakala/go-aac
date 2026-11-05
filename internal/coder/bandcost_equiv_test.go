@@ -199,8 +199,10 @@ func TestBandCostKernelUplimEquality(t *testing.T) {
 // TestBandCostKernelAvailable asserts the availability flag bandCostKernelOK is
 // set wherever a kernel is compiled in and the CPU has it (AVX2 and POPCNT on
 // amd64, NEON on arm64, never under SIMD_DISABLE). It checks the flag only, not
-// that quantizeAndEncodeBandCost reaches the kernel; that rests on the dispatch
-// condition in quantize.go and on the encoder golden tests.
+// that quantizeAndEncodeBandCost reaches the kernel. Nothing here observes that:
+// the kernel is bit-identical to the scalar loop, so every equivalence and
+// golden test also passes when the dispatch condition in quantize.go is never
+// true.
 func TestBandCostKernelAvailable(t *testing.T) {
 	want := ((runtime.GOARCH == "amd64" && cpu.X86.AVX2 && cpu.X86.POPCNT) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
 	if bandCostKernelOK != want {
