@@ -375,12 +375,13 @@ a decision; a back-to-back batch produced a spurious 1.9x on one case here.
 
 By default the encoder's hottest kernels are SIMD implementations built on
 [github.com/tphakala/simd](https://github.com/tphakala/simd): the NMR Viterbi
-trellis search, the AbsPow34 magnitude transform (`|x|^(3/4)`), and the
-QuantizeBands quantizer. The `simd` library picks the widest path the CPU
+trellis search and its node cost, the AbsPow34 magnitude transform
+(`|x|^(3/4)`), the QuantizeBands quantizer, and the LAME high-pass filter of the
+psychoacoustic model. The `simd` library picks the widest path the CPU
 supports at runtime and falls back to pure Go on any CPU without it. All use NEON
-on arm64. On x86_64 the trellis needs AVX2 and falls back to portable Go without
-it, while AbsPow34 and QuantizeBands use AVX (AbsPow34 with an SSE path below
-that). The cost-only band cost evaluated by every rate-distortion estimate is
+on arm64. On x86_64 the trellis step needs AVX2 and falls back to portable Go without
+it, while the node cost, the high-pass filter, AbsPow34 and QuantizeBands use AVX
+(AbsPow34 with an SSE path below that). The cost-only band cost evaluated by every rate-distortion estimate is
 Go assembly in this module: AVX2 on x86_64 and NEON on arm64, with the scalar
 loop on any other CPU and under `SIMD_DISABLE`. Every backend is bit-identical,
 so the default build produces byte-identical output to the scalar path and
@@ -413,6 +414,13 @@ rather than against `-tags noasm`: `BenchmarkEncodeInterleaved` at 48 kHz, 8
 interleaved rounds each, one pinned core, `GOMAXPROCS=1`, `benchstat` medians.
 It cuts encode time on a Raspberry Pi 5 by 15.7% (mono, 96 kbps) and 15.3%
 (stereo, 128 kbps); on the i7-1260P by 23.1% and 21.7%.
+
+The NMR node cost and the high-pass filter of the psychoacoustic model came after
+it, together with two small pure-Go changes to the trellis step, and are measured
+the same way against the build before them (`BenchmarkEncodeInterleaved` at 48
+kHz, 10 interleaved rounds each, one pinned core, `GOMAXPROCS=1`, `benchstat`
+means): encode time falls by 3.6% (mono, 96 kbps) and 6.2% (stereo, 128 kbps) on
+the i7-1260P, and by 5.2% and 5.5% on the Raspberry Pi 5.
 
 The Pi 5 row comes from a three-way interleaved run in one session on an
 otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build

@@ -248,6 +248,12 @@ jobs:
       # asserting bit-identical output and never-panic.
       - name: Fuzz SIMD trellis differential
         run: scripts/fuzz-smoke.sh FuzzNMRTrellisStep ./internal/coder/ 20
+      # The SIMD NMR node cost (default build) against the scalar loop it must match.
+      - name: Fuzz SIMD NMR node cost differential
+        run: scripts/fuzz-smoke.sh FuzzNMRNodeCostEquiv ./internal/coder/ 20
+      # The SIMD high-pass filter (default build) against the scalar filter it must match.
+      - name: Fuzz SIMD high-pass filter differential
+        run: scripts/fuzz-smoke.sh FuzzHpFilterEquiv ./internal/psy/ 20
       # The SIMD AbsPow34 kernel (default build) against the scalar reference it must match.
       - name: Fuzz SIMD AbsPow34 differential
         run: scripts/fuzz-smoke.sh FuzzAbsPow34Equiv ./internal/dsp/ 20
