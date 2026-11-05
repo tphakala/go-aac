@@ -111,6 +111,9 @@ func checkHpFilter(t *testing.T, firbuf []float32) {
 		}
 	}
 	psyHpFilterScalar(firbuf, &want)
+	if hpEqualBits(&got, &want) {
+		return
+	}
 	for i := range blockSizeLong {
 		if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
 			t.Fatalf("sample %d: got %v (%#x), want %v (%#x)", i, got[i], math.Float32bits(got[i]), want[i], math.Float32bits(want[i]))

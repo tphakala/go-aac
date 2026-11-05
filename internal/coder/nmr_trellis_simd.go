@@ -25,7 +25,7 @@ func nmrNodeCost(dst []float32, nd *[NMRNCand]float32, nb *[NMRNCand]int32, lam 
 
 // nmrInfPad is a template of +Inf the length of the padded signal, copied over
 // the scratch so the pad cells are filled by a block copy instead of a loop.
-var nmrInfPad = func() (t [3*NMRNCand - 2]float32) {
+var nmrInfPad = func() (t [nmrPadLen]float32) {
 	inf := fmath.Inf32()
 	for i := range t {
 		t[i] = inf

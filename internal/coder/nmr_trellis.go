@@ -11,11 +11,15 @@ package coder
 // within a single call, so the struct-zeroing reset of NMRState
 // (internal/enc/encoder.go) cannot leave a stale 0 that would win an argmin.
 // The noasm (scalar) build never touches these fields.
+// nmrPadLen is the worst-case length of the padded dpp signal; the +Inf
+// template nmrInfPad (nmr_trellis_simd.go) must cover all of it.
+const nmrPadLen = 3*NMRNCand - 2
+
 type nmrTrellisScratch struct {
 	vals [NMRNCand]float32       // per-row argmin cost from MinIdxOfSumRows
 	idxs [NMRNCand]int32         // per-row argmin index from MinIdxOfSumRows
 	kern [2*NMRNCand - 1]float32 // materialised transition kernel a[i]
-	padk [3*NMRNCand - 2]float32 // +Inf-padded dpp signal (the k argument)
+	padk [nmrPadLen]float32 // +Inf-padded dpp signal (the k argument)
 }
 
 // trellisGeom is the clipped window geometry the SIMD trellis wrapper
