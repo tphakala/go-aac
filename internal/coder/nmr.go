@@ -203,6 +203,19 @@ func nmrTrellisStepScalar(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	}
 }
 
+// nmrNodeCostScalar is the canonical node cost: dst[o] = nd[o] + lam*nb[o]
+// for o < len(dst) (len(dst) <= NMRNCand). The explicit float32 conversion
+// keeps the multiply and add separately rounded (Go may fuse into FMA even
+// across statements; only a conversion forces the rounding), matching the
+// scalar C reference. nmrNodeCost (nmr_trellis_simd.go, nmr_trellis_noasm.go)
+// dispatches to this or to a bit-identical SIMD form.
+func nmrNodeCostScalar(dst []float32, nd *[NMRNCand]float32, nb *[NMRNCand]int32, lam float32) {
+	for o := range dst {
+		t := float32(lam * float32(nb[o]))
+		dst[o] = nd[o] + t
+	}
+}
+
 // nmrSolve runs the Viterbi over the coding sequence act[0..nact-1] with
 // lambda binary-searched so the coded size approaches destbits. Fills
 // chosen[band] for every band referenced by act and returns the operating
@@ -231,21 +244,11 @@ func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 		}
 
 		b0 := act[0]
-		for o := range bnc[b0] {
-			// explicit float32 conversion: keeps the multiply and add
-			// separately rounded (Go may fuse into FMA even across
-			// statements; only a conversion forces the rounding),
-			// matching the scalar C reference
-			t := float32(lam * float32(st.Nb[b0][o]))
-			dp[o] = st.Nd[b0][o] + t
-		}
+		nmrNodeCost(dp[:bnc[b0]], &st.Nd[b0], &st.Nb[b0], lam)
 
 		for k := 1; k < nact; k++ {
 			b, pb := act[k], act[k-1]
-			for o := range bnc[b] {
-				t := float32(lam * float32(st.Nb[b][o])) // no FMA, see anchor loop
-				node[o] = st.Nd[b][o] + t
-			}
+			nmrNodeCost(node[:bnc[b]], &st.Nd[b], &st.Nb[b], lam)
 			dp, dpp = dpp, dp
 			nmrTrellisStep(dp[:], bp[k][:], dpp[:], node[:], lamsf[:],
 				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff, &st.trellis)

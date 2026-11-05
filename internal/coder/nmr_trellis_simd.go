@@ -10,10 +10,18 @@ import (
 )
 
 // NMRTrellisIsSIMD is true on the default build, recording that this file
-// provides the SIMD dispatch. The root package asserts it against
+// provides the SIMD dispatch for the trellis step and the node cost. The root package asserts it against
 // aac.SIMDEnabled (simd_kernels_test.go), so the public accessor cannot claim a
 // kernel this package did not compile.
 const NMRTrellisIsSIMD = true
+
+// nmrNodeCost is the default dispatch of the node cost: it maps
+// nmrNodeCostScalar onto f32.Int32ToFloat32ScaleAdd, which rounds the
+// float32(nb)*lam product before the add (never an FMA) on every path and so
+// is bit-identical to the scalar. TestNMRNodeCostMatchesScalar gates it.
+func nmrNodeCost(dst []float32, nd *[NMRNCand]float32, nb *[NMRNCand]int32, lam float32) {
+	f32.Int32ToFloat32ScaleAdd(dst, nd[:len(dst)], nb[:len(dst)], lam)
+}
 
 // nmrInfPad is a template of +Inf the length of the padded signal, copied over
 // the scratch so the pad cells are filled by a block copy instead of a loop.
