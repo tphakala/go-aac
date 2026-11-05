@@ -21,7 +21,7 @@ import (
 // catches that.
 //
 // It checks which dispatch file each package compiled, not that the compiled
-// dispatch reaches github.com/tphakala/simd, and it knows only the three kernels
+// dispatch reaches github.com/tphakala/simd, and it knows only the four kernels
 // named below. So every dispatch pair gated on noasm owes this file a
 // <Kernel>IsSIMD constant and a line here; a third pair that skips both is
 // invisible to it.
@@ -42,5 +42,9 @@ func TestSIMDEnabledMatchesKernels(t *testing.T) {
 	if coder.NMRTrellisIsSIMD != SIMDEnabled() {
 		t.Errorf("coder.NMRTrellisIsSIMD = %v, SIMDEnabled() = %v",
 			coder.NMRTrellisIsSIMD, SIMDEnabled())
+	}
+	if coder.BandCostIsSIMD != SIMDEnabled() {
+		t.Errorf("coder.BandCostIsSIMD = %v, SIMDEnabled() = %v",
+			coder.BandCostIsSIMD, SIMDEnabled())
 	}
 }
