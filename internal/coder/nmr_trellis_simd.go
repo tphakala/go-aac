@@ -10,9 +10,9 @@ import (
 )
 
 // NMRTrellisIsSIMD is true on the default build, recording that this file
-// provides the SIMD dispatch for the trellis step and the node cost. The root package asserts it against
-// aac.SIMDEnabled (simd_kernels_test.go), so the public accessor cannot claim a
-// kernel this package did not compile.
+// provides the SIMD dispatch for the trellis step and the node cost. The root
+// package asserts it against aac.SIMDEnabled (simd_kernels_test.go), so the
+// public accessor cannot claim a kernel this package did not compile.
 const NMRTrellisIsSIMD = true
 
 // nmrNodeCost is the default dispatch of the node cost: it maps

@@ -22,16 +22,13 @@ func checkNodeCostEquiv(t *testing.T, n int, lam float32, rng *rand.Rand) {
 	}
 	// Magnitudes above 2^24 make float32(nb) round, so a path that scales in
 	// integer or double precision first would diverge.
-	big := []int32{1<<24 + 1, 1<<24 + 3, -(1<<24 + 1), math.MaxInt32, math.MinInt32}
-	for i, v := range big {
-		nb[(i*7+1)%NMRNCand] = v
-	}
+	copy(nb[:], []int32{1<<24 + 1, 1<<24 + 3, -(1<<24 + 1), math.MaxInt32, math.MinInt32})
 
-	var got, want [NMRNCand]float32
+	var got [NMRNCand]float32
 	for i := range got {
 		got[i] = float32(i) + 0.5 // sentinel for "untouched"
-		want[i] = got[i]
 	}
+	want := got
 	nmrNodeCost(got[:n], &nd, &nb, lam)
 	nmrNodeCostScalar(want[:n], &nd, &nb, lam)
 	for i := range got {
