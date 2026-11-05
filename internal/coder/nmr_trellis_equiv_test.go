@@ -198,6 +198,41 @@ func TestNMRTrellisStepZeroStep(t *testing.T) {
 	}
 }
 
+// TestNMRTrellisStepMaxFloat32Minimum pins the strict limit of the
+// sentinel reconcile: a window whose minimum is exactly MaxFloat32 has no winner, so
+// every row must write dp = MaxFloat32 and bp = 0. A row minimum equal to the
+// limit that was treated as a hit (a <= test, or an argmin kept next to the
+// sentinel) would instead return a back-pointer o-dHi+idx, which is non-zero
+// for most rows; random planting reaches this exact-equality case only by
+// chance.
+func TestNMRTrellisStepMaxFloat32Minimum(t *testing.T) {
+	const maxN = NMRNCand
+	lamsf := make([]float32, 2*ScaleMaxDiff+1) // all zero: c = dpp[op] exactly
+	dpp := make([]float32, maxN)
+	node := make([]float32, maxN)
+	for i := range dpp {
+		dpp[i] = fmath.MaxFloat32
+		node[i] = float32(i%4) * 0.25
+	}
+	shapes := []struct{ nCur, nPrev, base, step int }{
+		{11, 11, 0, 1}, {17, 17, 0, 8}, {96, 96, 5, 1}, {17, 1, 0, 1}, {1, 96, 0, 1},
+	}
+	var ts nmrTrellisScratch
+	for _, sh := range shapes {
+		dp := make([]float32, maxN)
+		bp := make([]uint8, maxN)
+		for o := range bp {
+			bp[o] = 0xff // stale, so a skipped write is visible
+		}
+		nmrTrellisStep(dp, bp, dpp, node, lamsf, sh.nCur, sh.nPrev, sh.base, sh.step, ScaleMaxDiff, &ts)
+		for o := range sh.nCur {
+			if dp[o] != fmath.MaxFloat32 || bp[o] != 0 {
+				t.Fatalf("%+v o=%d: got dp=%v bp=%d, want dp=MaxFloat32 bp=0", sh, o, dp[o], bp[o])
+			}
+		}
+	}
+}
+
 // modRange maps an arbitrary (possibly negative) fuzz int into [0, n].
 func modRange(v, n int) int {
 	m := v % (n + 1)
