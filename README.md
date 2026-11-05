@@ -422,7 +422,7 @@ otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
 13.6% and 14.6% against the scalar. Those seconds time the codec alone in a warm
 loop, so they do not correspond to the realtime multiples in the
 `bench-encoders.sh` table above, which are whole-process wall clock over a
-different harness. All three kernels are byte-identical to the scalar port, so
+different harness. All four kernels are byte-identical to the scalar port, so
 the choice is a pure speed knob with no effect on output.
 
 The two builds differ only in speed, and because `-tags noasm` silently drops to
