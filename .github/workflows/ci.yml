@@ -357,9 +357,9 @@ jobs:
         # a skip. Without it this job could silently degrade to the very bug it
         # closes. -count=1 because setup-go restores the Go test cache, and a
         # cached ok would otherwise satisfy the gate without running it. The
-        # default run gates the SIMD trellis and AbsPow34 kernels byte-identical
-        # against the oracle (not merely transitively through the scalar), on
-        # the AVX2 path this runner provides, so the SIMD build cannot drift.
+        # default run gates every SIMD kernel byte-identical against the oracle
+        # (not merely transitively through the scalar), on the AVX2 path this
+        # runner provides, so the SIMD build cannot drift.
         # The noasm run gates the pure-Go scalar path against the same oracle.
         run: |
           GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \
