@@ -49,7 +49,7 @@ func TestSIMDDisableEnvIsHonoured(t *testing.T) {
 	//
 	// Anything that is not a full mask skips, INCLUDING a partial mask such as
 	// SIMD_DISABLE=avx2. Those are a supported per-tier A/B workflow for the
-	// three SIMD kernels this repo ships, and failing them here would break a
+	// SIMD kernels this repo ships, and failing them here would break a
 	// developer bisecting a kernel for a reason unrelated to what they are
 	// testing. What stops the CI lane silently decaying into a third copy of the
 	// default pass is not this skip but the workflow step beside it, which runs

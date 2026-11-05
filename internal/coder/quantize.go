@@ -167,6 +167,24 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	// size <= 96 always (the widest SwbSize1024 entry is 96), so c.qcoefs[:size]
 	// never panics.
 	qcoefs := c.qcoefs[:size]
+	// Cost-only calls (no bitstream, no dequantized output) are the hot path of
+	// the NMR band curves. bandCostAsm returns the same cost, bit count, energy
+	// and early exit as the scalar loop below, which stays the reference: a
+	// change to the loop is mirrored in bandcost_*.s. The kernel needs a band
+	// whose width is a multiple of four, as every swb width is.
+	if bandCostKernelOK && pb == nil && out == nil && size >= bandCostMinSize && size <= bandCostMaxSize && size&3 == 0 {
+		cost, qenergy, nbits, exited := bandCostAsm(in, qcoefs, sb, cv, &tables.Pow43, rng, off, bandCostFlagTable[cb], iq, q, rounding, clippedEscape, lambda, uplim)
+		if exited {
+			return uplim
+		}
+		if resBits != nil {
+			*resBits = nbits
+		}
+		if energy != nil {
+			*energy = qenergy
+		}
+		return cost
+	}
 	// Specialize the coefficient loop by codebook dimension, chosen once by
 	// d.pair (BT_PAIR in the C). dim is 2 for pair codebooks and 4 for quad
 	// codebooks and is constant per call; keeping it a runtime value in the

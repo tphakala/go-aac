@@ -254,6 +254,9 @@ jobs:
       # The SIMD QuantizeBands kernel (default build) against the scalar reference it must match.
       - name: Fuzz SIMD QuantizeBands differential
         run: scripts/fuzz-smoke.sh FuzzQuantizeBandsEquiv ./internal/dsp/ 20
+      # The SIMD band-cost kernel (default build) against the scalar loop it must match.
+      - name: Fuzz SIMD band cost differential
+        run: scripts/fuzz-smoke.sh FuzzBandCostEquiv ./internal/coder/ 20
 
   # The differential/PSNR gates are the only check that can tell a correct
   # encoder from a plausible-but-wrong one; PSNR alone cannot see a misported

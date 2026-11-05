@@ -380,9 +380,11 @@ QuantizeBands quantizer. The `simd` library picks the widest path the CPU
 supports at runtime and falls back to pure Go on any CPU without it. All use NEON
 on arm64. On x86_64 the trellis needs AVX2 and falls back to portable Go without
 it, while AbsPow34 and QuantizeBands use AVX (AbsPow34 with an SSE path below
-that). Every backend is bit-identical, so the default build produces
-byte-identical output to the scalar path and passes the same differential oracle
-gate, not a relaxed PSNR tier.
+that). The cost-only band cost evaluated by every rate-distortion estimate is
+Go assembly in this module: AVX2 on x86_64 and NEON on arm64, with the scalar
+loop on any other CPU and under `SIMD_DISABLE`. Every backend is bit-identical,
+so the default build produces byte-identical output to the scalar path and
+passes the same differential oracle gate, not a relaxed PSNR tier.
 
 Building with `-tags noasm` selects the pure-Go scalar kernels instead: no
 assembly in the binary and the `simd` dependency linked out entirely, for a
@@ -406,6 +408,12 @@ increments are measured against the trellis-only build, not the scalar one, so
 they compound rather than add. The QuantizeBands quantizer is SIMD by default as
 well; its separate speedup is not broken out in the table above.
 
+The band-cost kernel came later and is measured against the build before it
+rather than against `-tags noasm`: `BenchmarkEncodeInterleaved` at 48 kHz, 8
+interleaved rounds each, one pinned core, `GOMAXPROCS=1`, `benchstat` medians.
+It cuts encode time on a Raspberry Pi 5 by 15.7% (mono, 96 kbps) and 15.3%
+(stereo, 128 kbps); on the i7-1260P by 23.1% and 21.7%.
+
 The Pi 5 row comes from a three-way interleaved run in one session on an
 otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
 (this tree with AbsPow34 held at its scalar kernel) and the full SIMD build,
@@ -414,7 +422,7 @@ otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build
 13.6% and 14.6% against the scalar. Those seconds time the codec alone in a warm
 loop, so they do not correspond to the realtime multiples in the
 `bench-encoders.sh` table above, which are whole-process wall clock over a
-different harness. All three kernels are byte-identical to the scalar port, so
+different harness. All four kernels are byte-identical to the scalar port, so
 the choice is a pure speed knob with no effect on output.
 
 The two builds differ only in speed, and because `-tags noasm` silently drops to
