@@ -210,7 +210,12 @@ func nmrTrellisStepScalar(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 	act []int, nact, destbits int, chosen []int, loL, hiL float32,
 	iters int) float32 {
-	var dp, dpp, node [NMRNCand]float32
+	var cur, prev, node [NMRNCand]float32
+	// dp is the current step's costs, dpp the previous step's. They swap
+	// roles each step instead of copying dp into dpp: a step reads only
+	// dpp[:nPrev] and rewrites dp[:nCur], so whatever the old dpp held
+	// beyond that is never read.
+	dp, dpp := &cur, &prev
 	var lamsf [2*ScaleMaxDiff + 1]float32
 	var bp [128][NMRNCand]uint8
 	lam := float32(1.0)
@@ -237,11 +242,11 @@ func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 
 		for k := 1; k < nact; k++ {
 			b, pb := act[k], act[k-1]
-			dpp = dp
 			for o := range bnc[b] {
 				t := float32(lam * float32(st.Nb[b][o])) // no FMA, see anchor loop
 				node[o] = st.Nd[b][o] + t
 			}
+			dp, dpp = dpp, dp
 			nmrTrellisStep(dp[:], bp[k][:], dpp[:], node[:], lamsf[:],
 				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff, &st.trellis)
 		}
