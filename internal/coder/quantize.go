@@ -112,8 +112,7 @@ func clip(v, lo, hi int) int { return fmath.Clipi(v, lo, hi) }
 // dequantized coefficients are stored; when scaled is nil the pow34 spectrum
 // is computed into the Coder scratch. resBits/energy receive the exact
 // spectral bit count and quantized energy when non-nil. Cost-only calls (pb
-// and out nil) on bands wider than four coefficients go to bandCostKernel when
-// it runs on this CPU, with the same results as the loop below.
+// and out nil) run bandCostAsm where the build and CPU have it.
 // Mirrors aaccoder.c:quantize_and_encode_band_cost_template @ d09d5afc3a
 // (aaccoder.c:75-193), with the nine QUANTIZE_AND_ENCODE_BAND_COST_FUNC
 // macro specializations folded into one table-driven body per
@@ -170,26 +169,23 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	// never panics.
 	qcoefs := c.qcoefs[:size]
 	// Cost-only calls (no bitstream, no dequantized output) are the hot path of
-	// the NMR band curves; bandCostKernel evaluates them with SIMD and returns
-	// the same cost, bit count, energy and early exit as the scalar loop below.
-	// Four-coefficient bands stay on the scalar loop, which is faster at that
-	// width. The kernels walk the band four coefficients at a time and keep
-	// per-band results in a fixed stack frame sized for 96 coefficients; size
-	// <= 96 holds through c.qcoefs[:size] above, and every swb width is a
-	// multiple of four, which the size&3 test keeps the kernels from relying on.
-	if pb == nil && out == nil && size > 4 && size&3 == 0 {
-		if cost, qenergy, nbits, exited, ok := bandCostKernel(in, qcoefs, sb, cv, rng, off, d, iq, q, rounding, clippedEscape, lambda, uplim); ok {
-			if exited {
-				return uplim
-			}
-			if resBits != nil {
-				*resBits = nbits
-			}
-			if energy != nil {
-				*energy = qenergy
-			}
-			return cost
+	// the NMR band curves. bandCostAsm returns the same cost, bit count, energy
+	// and early exit as the scalar loop below, which stays the reference: a
+	// change to the loop is mirrored in bandcost_*.s. The kernel needs a band of
+	// at most 96 coefficients (c.qcoefs[:size] above) whose width is a multiple
+	// of four, as every swb width is.
+	if bandCostKernelOK && pb == nil && out == nil && size >= bandCostMinSize && size&3 == 0 {
+		cost, qenergy, nbits, exited := bandCostAsm(in, qcoefs, sb, cv, &tables.Pow43, rng, off, bandCostFlagTable[cb], iq, q, rounding, clippedEscape, lambda, uplim)
+		if exited {
+			return uplim
 		}
+		if resBits != nil {
+			*resBits = nbits
+		}
+		if energy != nil {
+			*energy = qenergy
+		}
+		return cost
 	}
 	// Specialize the coefficient loop by codebook dimension, chosen once by
 	// d.pair (BT_PAIR in the C). dim is 2 for pair codebooks and 4 for quad

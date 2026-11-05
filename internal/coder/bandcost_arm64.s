@@ -3,12 +3,13 @@
 //go:build !noasm
 
 #include "textflag.h"
+#include "go_asm.h"
 
 // Instructions the Go 1.26 assembler has no mnemonic for (the float32 vector
 // arithmetic, compares and conversions, SMAX, SMIN, CLZ, UMAXV and MOVI of
 // 32-bit lanes) are WORD-encoded.
 
-// func bandCostNEON(in []float32, q []int32, bits []uint8, vectors []float32, pow43 *[8192]float32, rng, off, flags int, iq, qs, rounding, clipEsc, lambda, uplim float32) (cost, qenergy float32, totBits int, exited bool)
+// func bandCostAsm(in []float32, q []int32, bits []uint8, vectors []float32, pow43 *[8192]float32, rng, off, flags int, iq, qs, rounding, clipEsc, lambda, uplim float32) (cost, qenergy float32, totBits int, exited bool)
 // Pass 1 computes four coefficients per iteration, one per lane: each group's rd*lambda + bits and
 // each coefficient's quantized energy term, every product and sum rounded separately as in the scalar
 // loop. Pass 2 then sums cost, totBits and qenergy in coefficient order, so every float addition runs
@@ -16,7 +17,7 @@
 // The frame holds pass 1's results for a band of at most 96 coefficients: the group costs at
 // 8(RSP) and the group bit counts at 200(RSP), 192 bytes each for up to 48 pairs, and the energy
 // terms at 392(RSP), 384 bytes for 96 coefficients.
-TEXT ·bandCostNEON(SB), 0, $768-169
+TEXT ·bandCostAsm(SB), 0, $768-169
 	MOVD   in_base+0(FP), R0
 	MOVD   in_len+8(FP), R7
 	LSR    $2, R7, R7
@@ -49,15 +50,15 @@ TEXT ·bandCostNEON(SB), 0, $768-169
 	ADD    $8, RSP, R8
 	ADD    $200, RSP, R19
 	ADD    $392, RSP, R9
-	CMP    $7, R22
+	CMP    $(const_bandCostPair|const_bandCostUnsigned|const_bandCostEscape), R22
 	BEQ    pue
-	CMP    $3, R22
+	CMP    $(const_bandCostPair|const_bandCostUnsigned), R22
 	BEQ    pu
-	CMP    $1, R22
+	CMP    $const_bandCostPair, R22
 	BEQ    ps
-	CMP    $2, R22
+	CMP    $const_bandCostUnsigned, R22
 	BEQ    qu
-	B      qs
+	B      qsigned
 
 pue:
 	LDPW   (R1), (R10, R11)
@@ -235,7 +236,7 @@ qu:
 	BNE    qu
 	B      sum
 
-qs:
+qsigned:
 	LDPW   (R1), (R10, R11)
 	LDPW   8(R1), (R12, R13)
 	ADD    $16, R1, R1
@@ -266,7 +267,7 @@ qs:
 	FMOVS.P F14, 4(R8)
 	MOVW.P R10, 4(R19)
 	SUBS   $1, R7, R7
-	BNE    qs
+	BNE    qsigned
 	B      sum
 
 sum:
@@ -278,7 +279,8 @@ sum:
 	ADD    $200, RSP, R19
 	ADD    $392, RSP, R9
 	MOVD   in_len+8(FP), R7
-	TBZ    $0, R22, sumquad
+	TST    $const_bandCostPair, R22
+	BEQ    sumquad
 	LSR    $1, R7, R7
 sumpair:
 	FMOVS.P 4(R8), F14

@@ -1,4 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+
+//go:build !noasm
+
+// Under -tags noasm both sides of every comparison below are the scalar loop,
+// so these tests are built only where a kernel can be compiled in, as
+// internal/dsp/*_simd_equiv_test.go are.
+
 package coder
 
 import (
@@ -11,6 +18,14 @@ import (
 	"github.com/tphakala/go-aac/internal/tables"
 	"github.com/tphakala/simd/cpu"
 )
+
+// bandCostRounding returns the rounding mode of a test case.
+func bandCostRounding(roundToZero bool) float32 {
+	if roundToZero {
+		return RoundToZero
+	}
+	return RoundStandard
+}
 
 // fillBandCostInput fills in with a seeded spectrum that covers every branch
 // of the band-cost loop: exact zeros and negative zeros (no sign bit), small
@@ -34,7 +49,7 @@ func fillBandCostInput(in []float32, rng *rand.Rand) {
 }
 
 // checkBandCost runs one cost-only quantizeAndEncodeBandCost call (out == nil,
-// which takes bandCostKernel on the default build) against the same call with
+// which takes bandCostAsm where the CPU has it) against the same call with
 // a dequantized-output buffer (out != nil, which always runs the scalar loop
 // and leaves cost, bits and energy unchanged) and requires bit-identical cost,
 // bit count, quantized energy and early exit.
@@ -54,8 +69,9 @@ func checkBandCost(t *testing.T, c *Coder, in []float32, scaleIdx, cb int, lambd
 // TestBandCostKernelMatchesScalar sweeps every codebook, scalefactor, both
 // rounding modes, four lambdas and both an infinite and a finite uplim (the
 // finite one exercises the early exit) over band widths 4..96, and requires the
-// band-cost kernel to match the scalar loop bit for bit. Four-coefficient bands
-// take the scalar loop, so the sweep covers both sides of the dispatch.
+// band-cost kernel to match the scalar loop bit for bit. Band widths below
+// bandCostMinSize take the scalar loop, so the sweep covers both sides of the
+// dispatch on arm64.
 func TestBandCostKernelMatchesScalar(t *testing.T) {
 	rng := rand.New(rand.NewSource(20261105))
 	var c Coder
@@ -63,10 +79,7 @@ func TestBandCostKernelMatchesScalar(t *testing.T) {
 	for trial := range 3000 {
 		size := 4 * (1 + rng.Intn(24))
 		fillBandCostInput(in[:size], rng)
-		rounding := float32(RoundStandard)
-		if trial%3 == 0 {
-			rounding = RoundToZero
-		}
+		rounding := bandCostRounding(trial%3 == 0)
 		uplim := fmath.Inf32()
 		if trial%5 == 0 {
 			uplim = float32(rng.Intn(400))
@@ -98,10 +111,7 @@ func FuzzBandCostEquiv(f *testing.F) {
 		if uplim < 0 {
 			uplim = fmath.Inf32()
 		}
-		rounding := float32(RoundStandard)
-		if rtz {
-			rounding = RoundToZero
-		}
+		rounding := bandCostRounding(rtz)
 		in := make([]float32, size)
 		fillBandCostInput(in, rand.New(rand.NewSource(seed)))
 		var c Coder
@@ -118,12 +128,31 @@ func TestBandCostKernelEscapeBoundaries(t *testing.T) {
 	var c Coder
 	in := make([]float32, 16)
 	for scaleIdx := 60; scaleIdx <= ScaleMaxPos; scaleIdx += 7 {
+		// iq and clippedEscape repeat quantizeAndEncodeBandCost's own
+		// expressions (quantize.go: iq := tables.Pow2SF[...], clippedEscape :=
+		// 165140.0 * iq); keep them in step.
 		iq := tables.Pow2SF[tables.PowSF2Zero+scaleIdx-ScaleOnePos+ScaleDiv512]
 		clipped := float32(165140.0 * iq)
 		below := math.Nextafter32(clipped, 0)
 		above := math.Nextafter32(clipped, fmath.Inf32())
-		// Magnitudes whose escape index lands on 8190, 8191 and past the clamp.
-		k := []float32{8190, 8191, 8192, 8193}
+		// Magnitudes whose escape index lands on 8190 and 8191 (the table
+		// entries the loop dequantizes) and on 8192 (a=165135 in the scaled
+		// domain, inside [8191.5946^(4/3), 165140) so it stays below
+		// clippedEscape yet quantizes past the 8191 clamp with standard
+		// rounding). Indices above 8192 are unreachable below clippedEscape.
+		escapes := []float32{
+			tables.Pow43[8190] * iq,
+			tables.Pow43[8191] * iq,
+			165135 * iq,
+			165129.6 * iq,
+		}
+		// Fail loudly if the magnitudes stop landing where this comment says.
+		qs := tables.Pow2SF[tables.PowSF2Zero-scaleIdx+ScaleOnePos-ScaleDiv512]
+		for i, want := range []int{8190, 8191, 8192, 8192} {
+			if got := quant(escapes[i], qs, RoundStandard); got != want || escapes[i] >= clipped {
+				t.Fatalf("sf %d: escapes[%d] quantizes to %d (clipped %v), want %d below clippedEscape", scaleIdx, i, got, escapes[i] >= clipped, want)
+			}
+		}
 		for i := range in {
 			var v float32
 			switch i % 4 {
@@ -134,16 +163,15 @@ func TestBandCostKernelEscapeBoundaries(t *testing.T) {
 			case 2:
 				v = above
 			default:
-				q := k[(i/4)%len(k)]
-				v = float32(math.Pow(float64(q), 4.0/3)) * iq
+				v = escapes[(i/4)%len(escapes)]
 			}
 			if i%2 == 1 {
 				v = -v
 			}
 			in[i] = v
 		}
-		for _, rounding := range []float32{RoundStandard, RoundToZero} {
-			checkBandCost(t, &c, in, scaleIdx, 11, 1, fmath.Inf32(), rounding)
+		for _, rtz := range []bool{false, true} {
+			checkBandCost(t, &c, in, scaleIdx, 11, 1, fmath.Inf32(), bandCostRounding(rtz))
 		}
 	}
 }
@@ -168,20 +196,14 @@ func TestBandCostKernelUplimEquality(t *testing.T) {
 	}
 }
 
-// TestBandCostKernelRuns asserts bandCostKernel reports ok wherever a kernel is
-// compiled in and the CPU has it (AVX2 on amd64, NEON on arm64, never under
-// -tags noasm or SIMD_DISABLE), so the equivalence tests above are not
-// comparing the scalar loop with itself on a host that should run the kernel.
+// TestBandCostKernelRuns asserts bandCostKernelOK is set wherever a kernel is
+// compiled in and the CPU has it (AVX2 and POPCNT on amd64, NEON on arm64,
+// never under SIMD_DISABLE), so the equivalence tests above are not comparing
+// the scalar loop with itself on a host that should run the kernel.
 func TestBandCostKernelRuns(t *testing.T) {
 	want := BandCostIsSIMD &&
-		((runtime.GOARCH == "amd64" && cpu.X86.AVX2) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
-	var c Coder
-	in := make([]float32, 8)
-	fillBandCostInput(in, rand.New(rand.NewSource(1)))
-	d := cbDescriptors[5]
-	_, _, _, _, ok := bandCostKernel(in, c.qcoefs[:8], tables.SpectralBits[4], tables.CodebookVectors[4],
-		int(tables.CBRange[5]), int(tables.CBMaxval[5]), d, 1, 1, RoundStandard, 1e30, 1, fmath.Inf32())
-	if ok != want {
-		t.Fatalf("bandCostKernel ran = %v, want %v (BandCostIsSIMD %v, GOARCH %s)", ok, want, BandCostIsSIMD, runtime.GOARCH)
+		((runtime.GOARCH == "amd64" && cpu.X86.AVX2 && cpu.X86.POPCNT) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
+	if bandCostKernelOK != want {
+		t.Fatalf("bandCostKernelOK = %v, want %v (BandCostIsSIMD %v, GOARCH %s)", bandCostKernelOK, want, BandCostIsSIMD, runtime.GOARCH)
 	}
 }
