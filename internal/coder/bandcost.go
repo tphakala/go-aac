@@ -11,6 +11,11 @@ const (
 	bandCostEscape               // BT_ESC: codebook 11 escape coding
 )
 
+// bandCostMaxSize is the widest band the kernels take: they keep their per-band
+// results in a fixed stack frame sized for 96 coefficients, the widest
+// SwbSize1024 entry.
+const bandCostMaxSize = 96
+
 // bandCostFlagTable holds the kernel flag bits of every codebook, derived once
 // from cbDescriptors so the hot path indexes it instead of rebuilding the flags.
 var bandCostFlagTable = func() (t [len(cbDescriptors)]int) {

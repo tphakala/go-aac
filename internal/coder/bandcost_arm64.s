@@ -43,10 +43,10 @@ TEXT ·bandCostAsm(SB), 0, $768-169
 	VDUP   R10, V9.S4
 	MOVW   $8191, R10
 	VDUP   R10, V16.S4
-	WORD $0x4F000431 // movi v17.4s, #1
-	WORD $0x4F010772 // movi v18.4s, #59
-	WORD $0x4F0006B3 // movi v19.4s, #21
-	WORD $0x4F000414 // movi v20.4s, #0
+	WORD $0x4F000431 // movi v17.4s, #1: sign-bit count of a nonzero lane; floor for the clz exponent
+	WORD $0x4F010772 // movi v18.4s, #59: escape length 2L-3 as 59 - 2*clz(max(idx, 1)), L = log2i(idx)
+	WORD $0x4F0006B3 // movi v19.4s, #21: bits of a clipped escape
+	WORD $0x4F000414 // movi v20.4s, #0: lower clamp of the escape index (v16 holds the upper, 8191)
 	ADD    $8, RSP, R8
 	ADD    $200, RSP, R19
 	ADD    $392, RSP, R9

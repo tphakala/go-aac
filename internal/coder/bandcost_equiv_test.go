@@ -201,9 +201,8 @@ func TestBandCostKernelUplimEquality(t *testing.T) {
 // never under SIMD_DISABLE), so the equivalence tests above are not comparing
 // the scalar loop with itself on a host that should run the kernel.
 func TestBandCostKernelRuns(t *testing.T) {
-	want := BandCostIsSIMD &&
-		((runtime.GOARCH == "amd64" && cpu.X86.AVX2 && cpu.X86.POPCNT) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
+	want := ((runtime.GOARCH == "amd64" && cpu.X86.AVX2 && cpu.X86.POPCNT) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
 	if bandCostKernelOK != want {
-		t.Fatalf("bandCostKernelOK = %v, want %v (BandCostIsSIMD %v, GOARCH %s)", bandCostKernelOK, want, BandCostIsSIMD, runtime.GOARCH)
+		t.Fatalf("bandCostKernelOK = %v, want %v (GOARCH %s)", bandCostKernelOK, want, runtime.GOARCH)
 	}
 }

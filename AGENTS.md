@@ -74,7 +74,7 @@ tools/               C harnesses (most with a README), gentables, quality, wav2a
 scripts/             fuzz-smoke.sh, bench-encoders.sh
 ```
 
-Kernels with SIMD variants come in `*_simd.go` and `*_noasm.go` pairs (`internal/dsp`, `internal/coder/nmr_trellis*.go`, `internal/coder/bandcost_{simd,noasm}.go`, `internal/simdbuild`). The in-module assembly kernel adds `bandcost.go` (flag bits), `bandcost_asm.go` (the shared declaration), `bandcost_amd64.{go,s}`, `bandcost_arm64.{go,s}` and `bandcost_other.go` (the `-tags noasm` and other-architecture fallback). `internal/tables/tables_gen.go` is emitted by `tools/gentables`; regenerate it, do not hand-edit.
+Kernels with SIMD variants come in `*_simd.go` and `*_noasm.go` pairs (`internal/dsp`, `internal/coder/nmr_trellis*.go`, `internal/simdbuild`). The in-module assembly band-cost kernel has only its `BandCostIsSIMD` constant in `bandcost_{simd,noasm}.go` and adds `bandcost.go` (flag bits), `bandcost_asm.go` (the shared declaration), `bandcost_amd64.{go,s}`, `bandcost_arm64.{go,s}` and `bandcost_other.go` (the `-tags noasm` and other-architecture fallback). `internal/tables/tables_gen.go` is emitted by `tools/gentables`; regenerate it, do not hand-edit.
 
 ## Testing approach
 

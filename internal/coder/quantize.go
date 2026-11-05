@@ -111,8 +111,7 @@ func clip(v, lo, hi int) int { return fmath.Clipi(v, lo, hi) }
 // codewords, sign bits and escapes are written; when out is non-nil the
 // dequantized coefficients are stored; when scaled is nil the pow34 spectrum
 // is computed into the Coder scratch. resBits/energy receive the exact
-// spectral bit count and quantized energy when non-nil. Cost-only calls (pb
-// and out nil) run bandCostAsm where the build and CPU have it.
+// spectral bit count and quantized energy when non-nil.
 // Mirrors aaccoder.c:quantize_and_encode_band_cost_template @ d09d5afc3a
 // (aaccoder.c:75-193), with the nine QUANTIZE_AND_ENCODE_BAND_COST_FUNC
 // macro specializations folded into one table-driven body per
@@ -171,10 +170,9 @@ func (c *Coder) quantizeAndEncodeBandCost(pb *bits.Writer, in, out, scaled []flo
 	// Cost-only calls (no bitstream, no dequantized output) are the hot path of
 	// the NMR band curves. bandCostAsm returns the same cost, bit count, energy
 	// and early exit as the scalar loop below, which stays the reference: a
-	// change to the loop is mirrored in bandcost_*.s. The kernel needs a band of
-	// at most 96 coefficients (c.qcoefs[:size] above) whose width is a multiple
-	// of four, as every swb width is.
-	if bandCostKernelOK && pb == nil && out == nil && size >= bandCostMinSize && size&3 == 0 {
+	// change to the loop is mirrored in bandcost_*.s. The kernel needs a band
+	// whose width is a multiple of four, as every swb width is.
+	if bandCostKernelOK && pb == nil && out == nil && size >= bandCostMinSize && size <= bandCostMaxSize && size&3 == 0 {
 		cost, qenergy, nbits, exited := bandCostAsm(in, qcoefs, sb, cv, &tables.Pow43, rng, off, bandCostFlagTable[cb], iq, q, rounding, clippedEscape, lambda, uplim)
 		if exited {
 			return uplim
