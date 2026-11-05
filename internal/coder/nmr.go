@@ -47,7 +47,7 @@ const (
 )
 
 // NMRState is the NMR coder's persistent per-band candidate cost curves
-// (~99 KiB) and rate-control carry-over. Allocated once, on the first encoder
+// (~105 KiB) and rate-control carry-over. Allocated once, on the first encoder
 // init or Reset that selects this coder, then reused across frames and
 // retained across every later Reset (docs/porting-guide.md pitfall 12,
 // issue #45). Mirrors struct AACNMRCurves (libavcodec/aacenc.h @ d09d5afc3a).
@@ -70,8 +70,9 @@ type NMRState struct {
 
 	// trellis is per-encoder scratch for the SIMD trellis kernel.
 	// Fixed-size arrays keep the encoder at 0 allocs/frame; the zero value
-	// is valid because the SIMD wrapper writes every cell it reads within a
-	// call (NMRState is reset by struct zeroing in internal/enc).
+	// is valid because each trellis step overwrites the scratch arrays it
+	// reads and nmrSolve builds the geometry plan at its start (NMRState is
+	// reset by struct zeroing in internal/enc).
 	trellis nmrTrellisScratch
 }
 
@@ -116,8 +117,9 @@ func ceilDiv(a, b int) int {
 // dp[o] = node[o] + that cost and record the back-pointer bp[o].
 // Mirrors aacencdsp.c:nmr_trellis_step_c @ d09d5afc3a, the SCALAR kernel.
 // This is the canonical kernel: the noasm build calls it directly through
-// the nmrTrellisStep forwarder, and the default build falls back to it for
-// step <= 0 (which nmrSolve never passes, but the equivalence sweep does).
+// the nmrTrellisStep and nmrTrellisStepPlanned forwarders, and the default
+// build falls back to it for step <= 0 (which nmrSolve never passes, but the
+// equivalence sweep does).
 // Both accumulations are plain adds with no multiply, so no FMA can arise
 // here and every add stays separately rounded. Separately: walking op in
 // ascending order under a strict c < bestc is what makes a tie pick the
@@ -210,13 +212,20 @@ func nmrTrellisStepScalar(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 	act []int, nact, destbits int, chosen []int, loL, hiL float32,
 	iters int) float32 {
-	var dp, dpp, node [NMRNCand]float32
+	var cur, prev, node [NMRNCand]float32
 	var lamsf [2*ScaleMaxDiff + 1]float32
 	var bp [128][NMRNCand]uint8
 	lam := float32(1.0)
+	// dp and dpp swap buffers each step where the C copies dp into dpp: a
+	// step reads only dpp[:nPrev], the values the previous step wrote.
+	dp, dpp := &cur, &prev
 
 	if nact <= 0 {
 		return lam
+	}
+	for k := 1; k < nact; k++ {
+		b, pb := act[k], act[k-1]
+		nmrTrellisPlan(&st.trellis, k, bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff)
 	}
 
 	for it := range iters {
@@ -226,24 +235,14 @@ func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 		}
 
 		b0 := act[0]
-		for o := range bnc[b0] {
-			// explicit float32 conversion: keeps the multiply and add
-			// separately rounded (Go may fuse into FMA even across
-			// statements; only a conversion forces the rounding),
-			// matching the scalar C reference
-			t := float32(lam * float32(st.Nb[b0][o]))
-			dp[o] = st.Nd[b0][o] + t
-		}
+		nmrNodeCost(dp[:bnc[b0]], &st.Nd[b0], &st.Nb[b0], lam)
 
 		for k := 1; k < nact; k++ {
 			b, pb := act[k], act[k-1]
-			dpp = dp
-			for o := range bnc[b] {
-				t := float32(lam * float32(st.Nb[b][o])) // no FMA, see anchor loop
-				node[o] = st.Nd[b][o] + t
-			}
-			nmrTrellisStep(dp[:], bp[k][:], dpp[:], node[:], lamsf[:],
-				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff, &st.trellis)
+			dp, dpp = dpp, dp
+			nmrNodeCost(node[:bnc[b]], &st.Nd[b], &st.Nb[b], lam)
+			nmrTrellisStepPlanned(dp[:], bp[k][:], dpp[:], node[:], lamsf[:],
+				bnc[b], bnc[pb], blo[b]-blo[pb], step, ScaleMaxDiff, &st.trellis, k)
 		}
 
 		// backtrack
@@ -282,6 +281,20 @@ func (c *Coder) nmrSolve(st *NMRState, blo, bnc []int, step int,
 		}
 	}
 	return lam
+}
+
+// nmrNodeCostGo sets dst[o] = nd[o] + lam*nb[o] for every o < len(dst), the
+// node costs of one band at the operating lambda. It is the scalar reference
+// the SIMD kernels are checked against (nmrNodeCost dispatches).
+func nmrNodeCostGo(dst []float32, nd *[NMRNCand]float32, nb *[NMRNCand]int32, lam float32) {
+	for o := range dst {
+		// explicit float32 conversion: keeps the multiply and add
+		// separately rounded (Go may fuse into FMA even across
+		// statements; only a conversion forces the rounding),
+		// matching the scalar C reference
+		t := float32(lam * float32(nb[o]))
+		dst[o] = nd[o] + t
+	}
 }
 
 // nmrBandCurve builds one coded band's (dist/threshold, bits) cost curve

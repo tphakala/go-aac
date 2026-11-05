@@ -400,7 +400,7 @@ func encodeCollectReset(t *testing.T, cfg EncoderConfig, sig [][]float32) [][]by
 	t.Helper()
 	// The warm-up always runs CoderNMR, whatever cfg asks for, so it does not
 	// necessarily differ from cfg in coder. Only the NMR path allocates and
-	// populates the ~99 KiB NMRState, so a warm-up on any other coder would
+	// populates the ~105 KiB NMRState, so a warm-up on any other coder would
 	// leave it untouched and Reset would then allocate a pristine one, skipping
 	// that part of the wipe entirely. Running NMR exercises the wipe when cfg is
 	// NMR and, when cfg is not, proves a leftover NMRState does not leak into

@@ -18,3 +18,20 @@ func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	nCur, nPrev, base, step, mdiff int, _ *nmrTrellisScratch) {
 	nmrTrellisStepScalar(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff)
 }
+
+// nmrTrellisPlan is a no-op on the noasm build: the scalar kernel derives its
+// offset bounds inside each step.
+func nmrTrellisPlan(_ *nmrTrellisScratch, _, _, _, _, _, _ int) {}
+
+// nmrTrellisStepPlanned is the noasm dispatch of a planned step: the
+// canonical scalar kernel.
+func nmrTrellisStepPlanned(dp []float32, bp []uint8, dpp, node, lamsf []float32,
+	nCur, nPrev, base, step, mdiff int, _ *nmrTrellisScratch, _ int) {
+	nmrTrellisStepScalar(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff)
+}
+
+// nmrNodeCost is the noasm dispatch of the node-cost kernel: the scalar
+// reference.
+func nmrNodeCost(dst []float32, nd *[NMRNCand]float32, nb *[NMRNCand]int32, lam float32) {
+	nmrNodeCostGo(dst, nd, nb, lam)
+}

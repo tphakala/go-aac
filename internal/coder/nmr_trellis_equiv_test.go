@@ -75,8 +75,9 @@ func TestNMRTrellisStepMatchesReference(t *testing.T) {
 	// Reused across the whole sweep on purpose: a stale value left in the
 	// scratch by one call must never leak into the next (the SIMD wrapper
 	// must write every cell it reads), which the encoder relies on after the
-	// NMRState struct-zeroing reset.
-	var ts nmrTrellisScratch
+	// NMRState struct-zeroing reset. The planned form gets its own scratch and
+	// outputs, so it cannot pass by reusing what the per-call form left there.
+	var ts, tsPlan nmrTrellisScratch
 
 	lamsf := make([]float32, 2*ScaleMaxDiff+1)
 	dpp := make([]float32, maxN)
@@ -84,6 +85,7 @@ func TestNMRTrellisStepMatchesReference(t *testing.T) {
 
 	dpGot, dpWant := make([]float32, maxN), make([]float32, maxN)
 	bpGot, bpWant := make([]uint8, maxN), make([]uint8, maxN)
+	dpPlan, bpPlan := make([]float32, maxN), make([]uint8, maxN)
 
 	// A coarse value set makes exact ties common, which is what the
 	// tie-break needs to be exercised by; the random fill covers the rest.
@@ -139,19 +141,30 @@ func TestNMRTrellisStepMatchesReference(t *testing.T) {
 							clear(dpWant)
 							clear(bpGot)
 							clear(bpWant)
+							fillTrellisSentinels(dpPlan, bpPlan)
 
 							nmrTrellisStepRef(dpWant, bpWant, dpp, node, lamsf,
 								nCur, nPrev, base, step, mdiff)
 							nmrTrellisStep(dpGot, bpGot, dpp, node, lamsf,
 								nCur, nPrev, base, step, mdiff, &ts)
+							// nmrSolve calls the planned form, which reuses the
+							// geometry nmrTrellisPlan stored in step slot k
+							// across its lambda iterations.
+							k := 1 + cases%127
+							nmrTrellisPlan(&tsPlan, k, nCur, nPrev, base, step, mdiff)
+							nmrTrellisStepPlanned(dpPlan, bpPlan, dpp, node, lamsf,
+								nCur, nPrev, base, step, mdiff, &tsPlan, k)
 							cases++
 
 							for o := range nCur {
 								if math.Float32bits(dpGot[o]) != math.Float32bits(dpWant[o]) ||
-									bpGot[o] != bpWant[o] {
-									t.Fatalf("quantised=%v step=%d mdiff=%d nCur=%d nPrev=%d base=%d o=%d:\n got dp=%v (%#x) bp=%d\nwant dp=%v (%#x) bp=%d",
+									bpGot[o] != bpWant[o] ||
+									math.Float32bits(dpPlan[o]) != math.Float32bits(dpWant[o]) ||
+									bpPlan[o] != bpWant[o] {
+									t.Fatalf("quantised=%v step=%d mdiff=%d nCur=%d nPrev=%d base=%d o=%d:\n got dp=%v (%#x) bp=%d\nplanned dp=%v (%#x) bp=%d\nwant dp=%v (%#x) bp=%d",
 										quantised, step, mdiff, nCur, nPrev, base, o,
 										dpGot[o], math.Float32bits(dpGot[o]), bpGot[o],
+										dpPlan[o], math.Float32bits(dpPlan[o]), bpPlan[o],
 										dpWant[o], math.Float32bits(dpWant[o]), bpWant[o])
 								}
 							}
@@ -248,15 +261,41 @@ func FuzzNMRTrellisStep(f *testing.F) {
 
 		dpGot, dpWant := make([]float32, maxN), make([]float32, maxN)
 		bpGot, bpWant := make([]uint8, maxN), make([]uint8, maxN)
-		var ts nmrTrellisScratch
 		nmrTrellisStepRef(dpWant, bpWant, dpp, node, lamsf, nCur, nPrev, base, step, mdiff)
-		nmrTrellisStep(dpGot, bpGot, dpp, node, lamsf, nCur, nPrev, base, step, mdiff, &ts)
-		for o := range nCur {
-			if math.Float32bits(dpGot[o]) != math.Float32bits(dpWant[o]) || bpGot[o] != bpWant[o] {
-				t.Fatalf("nCur=%d nPrev=%d base=%d step=%d mdiff=%d o=%d: got dp=%#x bp=%d, want dp=%#x bp=%d",
-					nCur, nPrev, base, step, mdiff, o,
-					math.Float32bits(dpGot[o]), bpGot[o], math.Float32bits(dpWant[o]), bpWant[o])
+		check := func(path string, dp []float32, bp []uint8) {
+			for o := range nCur {
+				if math.Float32bits(dp[o]) != math.Float32bits(dpWant[o]) || bp[o] != bpWant[o] {
+					t.Fatalf("%s nCur=%d nPrev=%d base=%d step=%d mdiff=%d o=%d: got dp=%#x bp=%d, want dp=%#x bp=%d",
+						path, nCur, nPrev, base, step, mdiff, o,
+						math.Float32bits(dp[o]), bp[o], math.Float32bits(dpWant[o]), bpWant[o])
+				}
 			}
 		}
+		var ts nmrTrellisScratch
+		nmrTrellisStep(dpGot, bpGot, dpp, node, lamsf, nCur, nPrev, base, step, mdiff, &ts)
+		check("step", dpGot, bpGot)
+		// nmrSolve plans each step's geometry once and reuses it across its
+		// lambda iterations; the planned step must match the same reference
+		// from its own sentinel-filled outputs and fresh scratch.
+		dpPlan, bpPlan := make([]float32, maxN), make([]uint8, maxN)
+		fillTrellisSentinels(dpPlan, bpPlan)
+		var tsPlan nmrTrellisScratch
+		k := 1 + modRange(int(seed), 126)
+		nmrTrellisPlan(&tsPlan, k, nCur, nPrev, base, step, mdiff)
+		nmrTrellisStepPlanned(dpPlan, bpPlan, dpp, node, lamsf, nCur, nPrev, base, step, mdiff, &tsPlan, k)
+		check("planned", dpPlan, bpPlan)
 	})
+}
+
+// fillTrellisSentinels fills dp with NaN and bp with 255, values no trellis
+// step writes (nmrSolve never produces NaN and a back-pointer stays below
+// NMRNCand), so a comparison fails on any cell the step leaves unwritten.
+func fillTrellisSentinels(dp []float32, bp []uint8) {
+	nan := float32(math.NaN())
+	for i := range dp {
+		dp[i] = nan
+	}
+	for i := range bp {
+		bp[i] = 255
+	}
 }

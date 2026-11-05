@@ -7,15 +7,18 @@ package coder
 // the offset window is clipped to what any valid (o, op) pair can reach (see
 // nmrTrellisGeom): the shared kernel spans at most 2*NMRNCand-1 lamsf entries
 // and each +Inf pad is at most NMRNCand-1 wide, so the padded signal fits in
-// 3*NMRNCand-2. The zero value is valid: the wrapper writes every cell it reads
-// within a single call, so the struct-zeroing reset of NMRState
-// (internal/enc/encoder.go) cannot leave a stale 0 that would win an argmin.
+// 3*NMRNCand-2. The zero value is valid: every step overwrites the vals, idxs,
+// kern and padk cells it reads, and nmrSolve stores the geometry of each of its
+// steps with nmrTrellisPlan before any of them runs, so the struct-zeroing
+// reset of NMRState (internal/enc/encoder.go) cannot leave a stale 0 that would
+// win an argmin or a stale window geometry.
 // The noasm (scalar) build never touches these fields.
 type nmrTrellisScratch struct {
 	vals [NMRNCand]float32       // per-row argmin cost from MinIdxOfSumRows
 	idxs [NMRNCand]int32         // per-row argmin index from MinIdxOfSumRows
 	kern [2*NMRNCand - 1]float32 // materialised transition kernel a[i]
 	padk [3*NMRNCand - 2]float32 // +Inf-padded dpp signal (the k argument)
+	geom [128]trellisGeom        // per-step window geometry nmrTrellisPlan stores
 }
 
 // trellisGeom is the clipped window geometry the SIMD trellis wrapper

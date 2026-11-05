@@ -116,7 +116,7 @@ func encodeSwitchStream(t *testing.T, e *Encoder) [][]byte {
 // that nmrBandCurve writes before every read (bounded by bnc[b]), Counted is
 // zeroed at SearchForQuantizersNMR entry, and Lam is only a warm-start hint that
 // falls outside the acceptance bracket and triggers a full re-search. That is
-// most of the ~99 KiB. The rate-control carry-over (SideEMA, LamRC, RCFill, and
+// most of the ~105 KiB. The rate-control carry-over (SideEMA, LamRC, RCFill, and
 // the short-block trio) is the part a stale value actually reaches the
 // bitstream through, and it is what the comparison pins.
 //
@@ -152,7 +152,7 @@ var nonNMRCoders = []struct {
 }
 
 // TestNMRStateRetainedAcrossCoderSwitch is the issue #45 contract. A pooled
-// encoder driven NMR -> other -> NMR must keep the same ~99 KiB NMRState across
+// encoder driven NMR -> other -> NMR must keep the same ~105 KiB NMRState across
 // the whole round trip (no drop, no reallocation), the stream it produces
 // afterwards must be byte-identical to a fresh NMR encoder's (nothing stale
 // carried over), and the middle arm must not touch the retained state at all.
@@ -244,7 +244,7 @@ func compareStreams(t *testing.T, what string, want, got [][]byte) {
 
 // TestResetNoAllocAcrossCoderSwitch pins the allocation win of issue #45: a
 // pooled encoder cycling NMR -> other -> NMR must not allocate, where before the
-// fix the switch back reallocated the ~99 KiB NMRState every cycle (which the
+// fix the switch back reallocated the ~105 KiB NMRState every cycle (which the
 // old code reports as exactly 1.00/op). The errors are captured rather than
 // fataled inside the closure: a t.Fatal there would Goexit out of the
 // measurement and skip the assertion below.

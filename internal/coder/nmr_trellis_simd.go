@@ -37,12 +37,41 @@ func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 		nmrTrellisStepScalar(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff)
 		return
 	}
+	g := nmrTrellisGeom(nCur, nPrev, base, step, mdiff)
+	nmrTrellisStepGeom(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff, &g, ts)
+}
+
+// nmrTrellisPlan stores the window geometry of Viterbi step k for
+// nmrTrellisStepPlanned. The geometry depends only on the band sizes, the
+// scalefactor offset and the step, none of which change across nmrSolve's
+// lambda iterations, so nmrSolve derives it once per solve instead of once
+// per iteration (two integer divisions per step).
+func nmrTrellisPlan(ts *nmrTrellisScratch, k, nCur, nPrev, base, step, mdiff int) {
+	if step > 0 {
+		ts.geom[k] = nmrTrellisGeom(nCur, nPrev, base, step, mdiff)
+	}
+}
+
+// nmrTrellisStepPlanned is nmrTrellisStep with the geometry nmrTrellisPlan
+// stored for step k.
+func nmrTrellisStepPlanned(dp []float32, bp []uint8, dpp, node, lamsf []float32,
+	nCur, nPrev, base, step, mdiff int, ts *nmrTrellisScratch, k int) {
+	if step <= 0 {
+		nmrTrellisStepScalar(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff)
+		return
+	}
+	nmrTrellisStepGeom(dp, bp, dpp, node, lamsf, nCur, nPrev, base, step, mdiff, &ts.geom[k], ts)
+}
+
+// nmrTrellisStepGeom runs one step > 0 Viterbi step over the window geometry
+// g, which nmrTrellisGeom derived from the same arguments.
+func nmrTrellisStepGeom(dp []float32, bp []uint8, dpp, node, lamsf []float32,
+	nCur, nPrev, base, step, mdiff int, g *trellisGeom, ts *nmrTrellisScratch) {
 	if nCur <= 0 {
 		return
 	}
 	dp, bp, node = dp[:nCur], bp[:nCur], node[:nCur]
 
-	g := nmrTrellisGeom(nCur, nPrev, base, step, mdiff)
 	if nPrev <= 0 || g.kernLen <= 0 {
 		// No row has a genuine candidate: write the sentinel for all rows,
 		// exactly as the scalar's empty-window branch does.
@@ -68,23 +97,26 @@ func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	// drop dpp into the middle. Every cell the primitive reads is written here,
 	// so the struct-zeroed scratch (NMRState reset) can never leak a stale 0
 	// that would win an argmin.
-	inf := fmath.Inf32()
 	p := ts.padk[:g.padFront+nPrev+g.padBack]
-	for i := range p {
-		p[i] = inf
-	}
+	copy(p, nmrInfPad[:])
 	copy(p[g.padFront:g.padFront+nPrev], dpp)
 
 	vals, idxs := ts.vals[:nCur], ts.idxs[:nCur]
 	f32.MinIdxOfSumRows(vals, idxs, a, p, g.basep, 1)
 
-	// Sentinel reconciliation: a winner exists only when the row's minimum
-	// beats the MaxFloat32 incumbent (strict, exactly the scalar's test). A
-	// dead window (all MaxFloat32/+Inf) yields vals[o] >= MaxFloat32 and writes
-	// the raw sentinel, never node[o]+vals[o] (which would overflow to +Inf).
+	nmrTrellisReconcile(dp, bp, node, vals, idxs, g.dHi)
+}
+
+// nmrTrellisReconcileGo is the sentinel reconciliation after the argmin: a
+// winner exists only when the row's minimum beats the MaxFloat32 incumbent
+// (strict, exactly the scalar's test). A dead window (all MaxFloat32/+Inf)
+// yields vals[o] >= MaxFloat32 and writes the raw sentinel, never
+// node[o]+vals[o] (which would overflow to +Inf). It is the scalar reference
+// the SIMD kernels are checked against (nmrTrellisReconcile dispatches).
+func nmrTrellisReconcileGo(dp []float32, bp []uint8, node, vals []float32, idxs []int32, dHi int) {
 	for o := range dp {
 		if vals[o] < fmath.MaxFloat32 {
-			bp[o] = uint8(o - g.dHi + int(idxs[o]))
+			bp[o] = uint8(o - dHi + int(idxs[o]))
 			dp[o] = node[o] + vals[o]
 		} else {
 			bp[o] = 0
@@ -92,3 +124,12 @@ func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 		}
 	}
 }
+
+// nmrInfPad is a +Inf template as long as padk, so nmrTrellisStepGeom fills
+// the padded signal with one copy instead of a store per cell.
+var nmrInfPad = func() (p [3*NMRNCand - 2]float32) {
+	for i := range p {
+		p[i] = fmath.Inf32()
+	}
+	return p
+}()
