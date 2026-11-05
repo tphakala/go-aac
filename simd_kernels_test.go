@@ -7,6 +7,7 @@ import (
 
 	"github.com/tphakala/go-aac/internal/coder"
 	"github.com/tphakala/go-aac/internal/dsp"
+	"github.com/tphakala/go-aac/internal/psy"
 )
 
 // TestSIMDEnabledMatchesKernels asserts that what SIMDEnabled reports is what
@@ -21,7 +22,7 @@ import (
 // catches that.
 //
 // It checks which dispatch file each package compiled, not that the compiled
-// dispatch reaches github.com/tphakala/simd, and it knows only the three kernels
+// dispatch reaches github.com/tphakala/simd, and it knows only the five kernels
 // named below. So every dispatch pair gated on noasm owes this file a
 // <Kernel>IsSIMD constant and a line here; a third pair that skips both is
 // invisible to it.
@@ -42,5 +43,13 @@ func TestSIMDEnabledMatchesKernels(t *testing.T) {
 	if coder.NMRTrellisIsSIMD != SIMDEnabled() {
 		t.Errorf("coder.NMRTrellisIsSIMD = %v, SIMDEnabled() = %v",
 			coder.NMRTrellisIsSIMD, SIMDEnabled())
+	}
+	if psy.HpFilterIsSIMD != SIMDEnabled() {
+		t.Errorf("psy.HpFilterIsSIMD = %v, SIMDEnabled() = %v",
+			psy.HpFilterIsSIMD, SIMDEnabled())
+	}
+	if psy.PeLogIsSIMD != SIMDEnabled() {
+		t.Errorf("psy.PeLogIsSIMD = %v, SIMDEnabled() = %v",
+			psy.PeLogIsSIMD, SIMDEnabled())
 	}
 }

@@ -6,7 +6,9 @@
 // across a default / noasm file pair, the same way the kernel dispatch points
 // are (internal/coder/nmr_trellis_{simd,noasm}.go,
 // internal/dsp/abspow34_{simd,noasm}.go,
-// internal/dsp/quantizebands_{simd,noasm}.go).
+// internal/dsp/quantizebands_{simd,noasm}.go,
+// internal/psy/hpfilter_{simd,noasm}.go,
+// internal/psy/pelog_{simd,noasm}.go).
 //
 // Its reason to exist is that code with no kernel of its own, in particular the
 // public aac.SIMDEnabled accessor, would otherwise have to carry the build tag

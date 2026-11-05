@@ -243,6 +243,9 @@ jobs:
       - name: Fuzz public stream decode
         run: scripts/fuzz-smoke.sh FuzzDecodeStream ./pcm/ 20
 
+      # The SIMD psychoacoustic high-pass filter (default build) against the scalar loop it must match.
+      - name: Fuzz SIMD high-pass filter differential
+        run: scripts/fuzz-smoke.sh FuzzHpFilterEquiv ./internal/psy/ 20
       # The SIMD trellis kernel (default build) against the naive
       # C-transcription reference: random shapes the fixed grid only samples,
       # asserting bit-identical output and never-panic.

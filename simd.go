@@ -5,7 +5,8 @@ package aac
 import "github.com/tphakala/go-aac/internal/simdbuild"
 
 // SIMDEnabled reports whether this build has the SIMD kernels (the NMR Viterbi
-// trellis, the AbsPow34 magnitude transform, and the QuantizeBands quantizer)
+// trellis, the AbsPow34 magnitude transform, the QuantizeBands quantizer, the
+// psychoacoustic high-pass filter, and the perceptual entropy logarithms)
 // compiled in instead of their scalar counterparts. They are the default; a
 // build with -tags noasm links the scalar kernels and no SIMD code, and
 // SIMDEnabled returns false.
@@ -17,6 +18,8 @@ import "github.com/tphakala/go-aac/internal/simdbuild"
 // against the C reference. It also says nothing about the CPU underneath, only
 // about what was compiled in. Each kernel then takes the widest path its host
 // offers, and they differ: the trellis needs AVX2 on x86_64 and falls back to
-// portable Go without it, while AbsPow34 and QuantizeBands use AVX (AbsPow34 with
-// an SSE path below it). All use NEON on arm64.
+// portable Go without it, the high-pass filter needs AVX2 and falls back to its
+// scalar code, the logarithms stay scalar on x86_64, while AbsPow34 and
+// QuantizeBands use AVX (AbsPow34 with an SSE path below it). All use NEON on
+// arm64.
 func SIMDEnabled() bool { return simdbuild.Enabled }
