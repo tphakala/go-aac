@@ -380,7 +380,11 @@ QuantizeBands quantizer. The `simd` library picks the widest path the CPU
 supports at runtime and falls back to pure Go on any CPU without it. All use NEON
 on arm64. On x86_64 the trellis needs AVX2 and falls back to portable Go without
 it, while AbsPow34 and QuantizeBands use AVX (AbsPow34 with an SSE path below
-that). Every backend is bit-identical, so the default build produces
+that). One kernel is Go assembly in this module rather than a `simd` primitive,
+because it walks the AAC codebook tables: the cost-only band cost evaluated by
+every rate-distortion estimate. It uses AVX2 on x86_64 and NEON on arm64, and
+runs its scalar loop on any other CPU, under `SIMD_DISABLE`, and for
+four-coefficient bands. Every backend is bit-identical, so the default build produces
 byte-identical output to the scalar path and passes the same differential oracle
 gate, not a relaxed PSNR tier.
 
@@ -405,6 +409,12 @@ disabled) and about 1.2% on the Pi 5 (1.3% with the tools disabled). Those
 increments are measured against the trellis-only build, not the scalar one, so
 they compound rather than add. The QuantizeBands quantizer is SIMD by default as
 well; its separate speedup is not broken out in the table above.
+
+The band-cost kernel came later and is measured against the build before it
+rather than against `-tags noasm`: `BenchmarkEncodeInterleaved` at 48 kHz, 8
+interleaved rounds each, `benchstat` medians. On a Raspberry Pi 5 (one core,
+`GOMAXPROCS=1`) it cuts encode time by 14.4% (mono, 96 kbps) and 13.8% (stereo,
+128 kbps); on the i7-1260P by 21.6% and 16.4%.
 
 The Pi 5 row comes from a three-way interleaved run in one session on an
 otherwise idle machine: the `-tags noasm` scalar build, a trellis-only build

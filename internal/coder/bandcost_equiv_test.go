@@ -4,9 +4,12 @@ package coder
 import (
 	"math"
 	"math/rand"
+	"runtime"
 	"testing"
 
 	"github.com/tphakala/go-aac/internal/fmath"
+	"github.com/tphakala/go-aac/internal/tables"
+	"github.com/tphakala/simd/cpu"
 )
 
 // fillBandCostInput fills in with a seeded spectrum that covers every branch
@@ -104,4 +107,81 @@ func FuzzBandCostEquiv(f *testing.F) {
 		var c Coder
 		checkBandCost(t, &c, in, scaleIdx, cb, lambda, uplim, rounding)
 	})
+}
+
+// TestBandCostKernelEscapeBoundaries pins codebook 11 coefficients at and next
+// to clippedEscape (165140 * iq) and across the 8191 escape clamp, values the
+// seeded sweep almost never produces. A kernel that compares t > clippedEscape
+// instead of t >= clippedEscape, or clamps the escape index at anything but
+// 8191, fails here.
+func TestBandCostKernelEscapeBoundaries(t *testing.T) {
+	var c Coder
+	in := make([]float32, 16)
+	for scaleIdx := 60; scaleIdx <= ScaleMaxPos; scaleIdx += 7 {
+		iq := tables.Pow2SF[tables.PowSF2Zero+scaleIdx-ScaleOnePos+ScaleDiv512]
+		clipped := float32(165140.0 * iq)
+		below := math.Nextafter32(clipped, 0)
+		above := math.Nextafter32(clipped, fmath.Inf32())
+		// Magnitudes whose escape index lands on 8190, 8191 and past the clamp.
+		k := []float32{8190, 8191, 8192, 8193}
+		for i := range in {
+			var v float32
+			switch i % 4 {
+			case 0:
+				v = clipped
+			case 1:
+				v = below
+			case 2:
+				v = above
+			default:
+				q := k[(i/4)%len(k)]
+				v = float32(math.Pow(float64(q), 4.0/3)) * iq
+			}
+			if i%2 == 1 {
+				v = -v
+			}
+			in[i] = v
+		}
+		for _, rounding := range []float32{RoundStandard, RoundToZero} {
+			checkBandCost(t, &c, in, scaleIdx, 11, 1, fmath.Inf32(), rounding)
+		}
+	}
+}
+
+// TestBandCostKernelUplimEquality sets uplim to the exact cost the scalar loop
+// reaches after the last group, so the early exit (cost >= uplim) fires on the
+// final group. A kernel that tests cost > uplim runs to completion instead and
+// reports bits and energy the scalar loop never writes.
+func TestBandCostKernelUplimEquality(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261106))
+	var c Coder
+	in := make([]float32, 96)
+	dequant := make([]float32, 96)
+	for trial := range 600 {
+		size := 8 + 4*rng.Intn(23)
+		fillBandCostInput(in[:size], rng)
+		cb := 1 + rng.Intn(11)
+		scaleIdx := rng.Intn(ScaleMaxPos + 1)
+		lambda := []float32{1, 0.3, 7.5}[trial%3]
+		full := c.quantizeAndEncodeBandCost(nil, in[:size], dequant[:size], nil, scaleIdx, cb, lambda, fmath.Inf32(), nil, nil, RoundStandard)
+		checkBandCost(t, &c, in[:size], scaleIdx, cb, lambda, full, RoundStandard)
+	}
+}
+
+// TestBandCostKernelRuns asserts bandCostKernel reports ok wherever a kernel is
+// compiled in and the CPU has it (AVX2 on amd64, NEON on arm64, never under
+// -tags noasm or SIMD_DISABLE), so the equivalence tests above are not
+// comparing the scalar loop with itself on a host that should run the kernel.
+func TestBandCostKernelRuns(t *testing.T) {
+	want := BandCostIsSIMD &&
+		((runtime.GOARCH == "amd64" && cpu.X86.AVX2) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
+	var c Coder
+	in := make([]float32, 8)
+	fillBandCostInput(in, rand.New(rand.NewSource(1)))
+	d := cbDescriptors[5]
+	_, _, _, _, ok := bandCostKernel(in, c.qcoefs[:8], tables.SpectralBits[4], tables.CodebookVectors[4],
+		int(tables.CBRange[5]), int(tables.CBMaxval[5]), d, 1, 1, RoundStandard, 1e30, 1, fmath.Inf32())
+	if ok != want {
+		t.Fatalf("bandCostKernel ran = %v, want %v (BandCostIsSIMD %v, GOARCH %s)", ok, want, BandCostIsSIMD, runtime.GOARCH)
+	}
 }
