@@ -7,6 +7,7 @@ import (
 
 	"github.com/tphakala/go-aac/internal/coder"
 	"github.com/tphakala/go-aac/internal/dsp"
+	"github.com/tphakala/go-aac/internal/psy"
 )
 
 // TestSIMDEnabledMatchesKernels asserts that what SIMDEnabled reports is what
@@ -21,16 +22,20 @@ import (
 // catches that.
 //
 // It checks which dispatch file each package compiled, not that the compiled
-// dispatch reaches github.com/tphakala/simd, and it knows only the four kernels
+// dispatch reaches github.com/tphakala/simd, and it knows only the dispatch pairs
 // named below. So every dispatch pair gated on noasm owes this file a
-// <Kernel>IsSIMD constant and a line here; a third pair that skips both is
-// invisible to it.
+// <Kernel>IsSIMD constant and a line here; a pair that skips both is invisible
+// to it.
 //
 // This file carries no build tag on purpose, so the assertion runs in both
 // builds rather than only in the one the tag selects. It does not subsume the
 // tagged pair in simd_noasm_test.go and simd_simd_test.go: those are each gated
 // by a literal build tag (noasm / !noasm) that this file never carries.
 func TestSIMDEnabledMatchesKernels(t *testing.T) {
+	if psy.HpFilterIsSIMD != SIMDEnabled() {
+		t.Errorf("psy.HpFilterIsSIMD = %v, SIMDEnabled() = %v",
+			psy.HpFilterIsSIMD, SIMDEnabled())
+	}
 	if dsp.AbsPow34IsSIMD != SIMDEnabled() {
 		t.Errorf("dsp.AbsPow34IsSIMD = %v, SIMDEnabled() = %v",
 			dsp.AbsPow34IsSIMD, SIMDEnabled())

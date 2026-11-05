@@ -248,6 +248,12 @@ jobs:
       # asserting bit-identical output and never-panic.
       - name: Fuzz SIMD trellis differential
         run: scripts/fuzz-smoke.sh FuzzNMRTrellisStep ./internal/coder/ 20
+      # The SIMD NMR node cost (default build) against the scalar loop it must match.
+      - name: Fuzz SIMD NMR node cost differential
+        run: scripts/fuzz-smoke.sh FuzzNMRNodeCostEquiv ./internal/coder/ 20
+      # The SIMD high-pass filter (default build) against the scalar filter it must match.
+      - name: Fuzz SIMD high-pass filter differential
+        run: scripts/fuzz-smoke.sh FuzzHpFilterEquiv ./internal/psy/ 20
       # The SIMD AbsPow34 kernel (default build) against the scalar reference it must match.
       - name: Fuzz SIMD AbsPow34 differential
         run: scripts/fuzz-smoke.sh FuzzAbsPow34Equiv ./internal/dsp/ 20
@@ -351,9 +357,9 @@ jobs:
         # a skip. Without it this job could silently degrade to the very bug it
         # closes. -count=1 because setup-go restores the Go test cache, and a
         # cached ok would otherwise satisfy the gate without running it. The
-        # default run gates the SIMD trellis and AbsPow34 kernels byte-identical
-        # against the oracle (not merely transitively through the scalar), on
-        # the AVX2 path this runner provides, so the SIMD build cannot drift.
+        # default run gates every SIMD kernel byte-identical against the oracle
+        # (not merely transitively through the scalar), on the AVX2 path this
+        # runner provides, so the SIMD build cannot drift.
         # The noasm run gates the pure-Go scalar path against the same oracle.
         run: |
           GOAAC_FFMPEG="$HOME/ffmpeg-oracle/ffmpeg" \

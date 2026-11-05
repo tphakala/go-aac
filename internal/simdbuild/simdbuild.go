@@ -4,8 +4,10 @@
 // build. They are enabled by default; a build with -tags noasm selects the
 // scalar fallback instead. It holds nothing but the constant Enabled, split
 // across a default / noasm file pair, the same way the kernel dispatch points
-// are (internal/coder/nmr_trellis_{simd,noasm}.go,
+// are (internal/coder/nmr_trellis_{simd,noasm}.go, which dispatch both the
+// trellis step and the node cost,
 // internal/coder/bandcost_{simd,noasm}.go,
+// internal/psy/hpfilter_{simd,noasm}.go,
 // internal/dsp/abspow34_{simd,noasm}.go,
 // internal/dsp/quantizebands_{simd,noasm}.go).
 //
