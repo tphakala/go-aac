@@ -196,13 +196,32 @@ func TestBandCostKernelUplimEquality(t *testing.T) {
 	}
 }
 
-// TestBandCostKernelRuns asserts bandCostKernelOK is set wherever a kernel is
-// compiled in and the CPU has it (AVX2 and POPCNT on amd64, NEON on arm64,
-// never under SIMD_DISABLE), so the equivalence tests above are not comparing
-// the scalar loop with itself on a host that should run the kernel.
-func TestBandCostKernelRuns(t *testing.T) {
+// TestBandCostKernelAvailable asserts the availability flag bandCostKernelOK is
+// set wherever a kernel is compiled in and the CPU has it (AVX2 and POPCNT on
+// amd64, NEON on arm64, never under SIMD_DISABLE). It checks the flag only, not
+// that quantizeAndEncodeBandCost reaches the kernel; that rests on the dispatch
+// condition in quantize.go and on the encoder golden tests.
+func TestBandCostKernelAvailable(t *testing.T) {
 	want := ((runtime.GOARCH == "amd64" && cpu.X86.AVX2 && cpu.X86.POPCNT) || (runtime.GOARCH == "arm64" && cpu.ARM64.NEON))
 	if bandCostKernelOK != want {
 		t.Fatalf("bandCostKernelOK = %v, want %v (GOARCH %s)", bandCostKernelOK, want, runtime.GOARCH)
+	}
+}
+
+// TestBandCostKernelSkipsOddWidths runs pair codebooks on widths that are not a
+// multiple of four. The kernel walks four coefficients at a time, so it would
+// drop the trailing pair the scalar loop codes; the size&3 test in
+// quantizeAndEncodeBandCost keeps such bands on the scalar loop. Quad codebooks
+// are left out: their scalar loop also stops at floor(size/4) groups, so the
+// two paths agree there either way.
+func TestBandCostKernelSkipsOddWidths(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261107))
+	var c Coder
+	in := make([]float32, 18)
+	for _, size := range []int{10, 14, 18} {
+		for cb := 5; cb <= 11; cb++ {
+			fillBandCostInput(in[:size], rng)
+			checkBandCost(t, &c, in[:size], 100, cb, 1, fmath.Inf32(), RoundStandard)
+		}
 	}
 }
