@@ -15,6 +15,16 @@ import (
 // kernel this package did not compile.
 const NMRTrellisIsSIMD = true
 
+// nmrInfPad is a template of +Inf the length of the padded signal, copied over
+// the scratch so the pad cells are filled by a block copy instead of a loop.
+var nmrInfPad = func() (t [3*NMRNCand - 2]float32) {
+	inf := fmath.Inf32()
+	for i := range t {
+		t[i] = inf
+	}
+	return t
+}()
+
 // nmrTrellisStep is the default dispatch: it maps one Viterbi step onto
 // f32.MinIdxOfSumRows (NEON on arm64, AVX2 on amd64, bit-identical pure-Go
 // fallback elsewhere) and reconciles the scalar's MaxFloat32 sentinel
@@ -68,11 +78,8 @@ func nmrTrellisStep(dp []float32, bp []uint8, dpp, node, lamsf []float32,
 	// drop dpp into the middle. Every cell the primitive reads is written here,
 	// so the struct-zeroed scratch (NMRState reset) can never leak a stale 0
 	// that would win an argmin.
-	inf := fmath.Inf32()
 	p := ts.padk[:g.padFront+nPrev+g.padBack]
-	for i := range p {
-		p[i] = inf
-	}
+	copy(p, nmrInfPad[:])
 	copy(p[g.padFront:g.padFront+nPrev], dpp)
 
 	vals, idxs := ts.vals[:nCur], ts.idxs[:nCur]
