@@ -9,7 +9,10 @@ seconds, peak RSS and stream size. `GOAAC_FFMPEG` must point at the pinned
 oracle build; a distro FFmpeg is refused, because 7.x and earlier ship a
 different coder set whose `anmr` is not the `nmr` trellis this library ports.
 PROVENANCE.md carries the required configure recipe, including the
-`-ffp-contract=off` that is part of the pin.
+`-ffp-contract=off` that is part of the pin. Each run writes to a new private
+`go-aac-bench.*` directory under `GOAAC_BENCH_WORK`, or under `$TMPDIR`
+(default `/tmp`) when that is unset, and prints its path. The script removes
+nothing.
 
 ```sh
 GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh          # generated reproducible input
