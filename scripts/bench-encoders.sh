@@ -20,13 +20,13 @@
 #
 # Requires: go, GNU time, and GOAAC_FFMPEG pointing at the pinned ffmpeg.
 #
-# This script only ever reads its input and writes outputs into a private temp
-# directory; it never deletes or modifies the input file.
+# This script only reads its input and deletes nothing. Each run writes its
+# outputs (the wav2aac build, the generated input and the encoded streams) to a
+# new private go-aac-bench.* directory under GOAAC_BENCH_WORK, or under TMPDIR
+# (default /tmp) when that is unset, and prints its path.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -46,6 +46,11 @@ if ! "$ff" -hide_banner -h encoder=aac 2>/dev/null | grep -qE '^ +nmr +[0-9]'; t
   echo "Distro builds ship anmr/twoloop/fast and would measure the wrong C."
   exit 1
 fi
+
+parent="${GOAAC_BENCH_WORK:-${TMPDIR:-/tmp}}"
+mkdir -p "$parent"
+work="$(mktemp -d "$parent/go-aac-bench.XXXXXX")"
+echo "outputs: $work"
 
 bitrate="${GOAAC_BENCH_BR:-128000}"
 kbps=$((bitrate / 1000))
