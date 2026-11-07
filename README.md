@@ -2,148 +2,30 @@
 
 [![CI](https://github.com/tphakala/go-aac/actions/workflows/ci.yml/badge.svg)](https://github.com/tphakala/go-aac/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-aac.svg)](https://pkg.go.dev/github.com/tphakala/go-aac)
-[![codecov](https://codecov.io/gh/tphakala/go-aac/branch/main/graph/badge.svg)](https://codecov.io/gh/tphakala/go-aac)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/tphakala/go-aac)](go.mod)
-[![Latest tag](https://img.shields.io/github/v/tag/tphakala/go-aac?sort=semver&label=release)](https://github.com/tphakala/go-aac/tags)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tphakala/go-aac/badge)](https://scorecard.dev/viewer/?uri=github.com/tphakala/go-aac)
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/License-LGPL--2.1--or--later-blue.svg)](LICENSE)
-[![Sponsor](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/tphakala)
 
 Pure-Go AAC-LC encoder and decoder, ported from FFmpeg's native AAC encoder and
-fixed-point decoder. No cgo and no external libraries in the published module.
+fixed-point decoder. No cgo and no external libraries. Each subsystem is
+validated bit for bit against the C reference, and the decoder's output is
+byte-identical to `ffmpeg -c:a aac_fixed`.
 
-It is the AAC member of a family of pure-Go audio libraries that also covers
-[WAV](https://github.com/tphakala/go-wav),
-[FLAC](https://github.com/tphakala/go-flac),
-[Opus](https://github.com/tphakala/go-opus) and
-[M4A](https://github.com/tphakala/go-m4a), and it presents the same API shape as
-its siblings, so a program that already speaks one of them speaks this one too.
+It is the AAC member of a family of pure-Go audio libraries with
+[go-wav](https://github.com/tphakala/go-wav),
+[go-flac](https://github.com/tphakala/go-flac),
+[go-opus](https://github.com/tphakala/go-opus) and
+[go-m4a](https://github.com/tphakala/go-m4a), and has the same API shape.
 
 ## Status
 
-Every layer is validated against the C reference before it lands (see
-Approach), so the pieces marked done are done in the strong sense.
-
-- **Encoder: complete for AAC-LC.** All three FFmpeg coders (NMR, twoloop,
-  fast), all four coding tools (TNS, PNS, M/S, I/S), mono and stereo, 44.1 and
-  48 kHz, ADTS output. The NMR coder is the default, as it is upstream at the
-  pin (`aac_coder` is `AAC_CODER_NMR`, and the commit that made it so says the
-  old coders will soon be removed). FFmpeg's own released docs still describe
-  the older set, in which `twoloop` is the default and `anmr` is a different,
-  experimental coder; that text is stale, not a contradiction.
-- **Decoder: usable for AAC-LC.** Pure fixed point, producing output identical
-  to `ffmpeg -c:a aac_fixed` at the sample level. The public `pcm.NewDecoder`
-  streams an ADTS (or raw plus ASC) AAC-LC stream to interleaved little-endian
-  S16 PCM, matching the oracle byte for byte across the test corpus and on Apple
-  afconvert output, with no cgo. Mono and stereo across the AAC-LC sample-rate
-  range: the parser accepts the full MPEG-4 sample-rate table (7.35 to 96 kHz),
-  and decode is byte-verified against the oracle at representative rates from 8
-  to 96 kHz. The encoder, separately, is restricted to 44.1 and 48 kHz. HE-AAC
-  (SBR/PS) is rejected with a precise `ErrUnsupportedSBR` / `ErrUnsupportedPS`
-  so a caller can hand it to an external decoder; 960-sample frames and channel
-  configs above stereo are also not covered.
-
-Quality tracks the C encoder closely. At 96/128/192 kbps stereo with the NMR
-coder on both sides, decoded PSNR is within **+-0.04 dB** of FFmpeg's own
-output and stream sizes within **0.22%**.
-
-On real field recordings the port slightly exceeds the C encoder at the same
-bitrate:
-
-| Recording (48 kHz mono, 128 kbps) | go-aac | FFmpeg (same coder) |
-| --------------------------------- | -----: | ------------------: |
-| 120 s dawn chorus                 | **85.44 dB** | 85.42 dB |
-| 15 s distant owl call             | **63.90 dB** | 63.87 dB |
-
-Not implemented: HE-AAC (SBR/PS), xHE-AAC, LATM, ER/LD/ELD profiles,
-multichannel beyond stereo, VBR (`global_quality`), MP4 muxing (the pure-Go
-[go-m4a](https://github.com/tphakala/go-m4a) is the container companion).
-
-## Audio quality
-
-go-aac is competitive with ffmpeg's built-in AAC-LC encoder: it matches or beats
-it on waveform fidelity and PEAQ, while ViSQOL can favour either depending on the
-material. ffmpeg's native `aac` is a modest reference; a fully tuned encoder such
-as libfdk_aac would be a stronger opponent.
-
-Quality is measured objectively, not by ear: real 48 kHz recordings are encoded,
-decoded, and scored against the original.
-
-- ViSQOL (MOS, 1-5, higher is better): predicted listening-test score; 4.5+ is
-  effectively transparent.
-- PEAQ (ITU-R BS.1387 ODG, 0 to -4, closer to 0 is better): audibility of
-  impairment; 0 imperceptible, -1 audible but not annoying, -2 slightly
-  annoying.
-- SNR and spectral distance (dB): raw fidelity. A high SNR alone does not
-  guarantee good perceived quality.
-
-Snapshot (2026-09-05), 128 kbps, decoded output scored against the source:
-
-| Clip              | go-aac ViSQOL / PEAQ | ffmpeg aac ViSQOL / PEAQ |
-|-------------------|----------------------|--------------------------|
-| nature soundscape | 4.64 / -0.01         | 4.63 / -0.37             |
-| pygmy owl         | 4.20 / -0.05         | 4.49 / -0.10             |
-
-On the soundscape go-aac is transparent while ffmpeg shows a small penalty; on
-the owl clip ffmpeg scores higher on ViSQOL while go-aac keeps better PEAQ and
-raw fidelity. Net: comparable and material-dependent. This is a small
-directional sample, not a full benchmark; results vary with material and
-bitrate.
-
-A corpus-based quality gate guards against regressions. `task quality:gate`
-re-measures the encoder on a deterministic synthetic corpus (encode, decode
-with go-aac's own decoder, align by cross-correlation, score against the
-source) and fails when SNR, band-limited SNR, segmental SNR, log-spectral
-distance, or pre-echo drifts past a tolerance from a committed baseline, or the
-encoder's alignment delay changes; it needs no external tool and runs in CI on
-every platform. `task quality` renders
-the full go-aac-versus-ffmpeg (native `aac`, and `libfdk_aac` when the build
-has it) comparison report, per program, bitrate, and coder, with optional
-ViSQOL and PEAQ columns when those binaries are present.
-
-One case in the full report is expected to fail. Encoding the synthetic
-`bird-chirps` program at 44.1 kHz and 128 kbps with the twoloop coder makes the
-rate control stop moving: lambda pins at its floor while the frame stays at the
-buffer ceiling, so every further pass quantizes identically. FFmpeg's C encoder
-has the same loop with no exit and spins forever on that input (the pinned build
-ignores SIGTERM while it does), which is why a reference run on it needs a hard
-kill. go-aac detects the condition and returns an error (`enc: rate control
-cannot converge at 128000 bps, 44100 Hz`) instead of hanging, so `task quality`
-reports `1 failed` and exits 1 for that case. It is not a quality regression,
-and that configuration is not in the committed gate grid (64 and 192 kbps). The
-other cases in a run over both sample rates, 64 to 192 kbps and all three
-coders completed. Only this one input and configuration is known to reach the
-state; which real signals could reach it has not been characterised.
-
-## Approach
-
-go-aac is a faithful port of FFmpeg's AAC encoder and fixed-point decoder at a
-pinned commit (`d09d5afc3a`), kept honest by differential testing against the
-real C.
-
-For each subsystem, a C harness links the pinned FFmpeg libraries, runs the
-**actual FFmpeg function** on identical input, and dumps its internals; the Go
-port must then reproduce them. That is a far sharper instrument than PSNR:
-
-| Harness | What it pins | Result |
-| ------- | ------------ | ------ |
-| `tools/cdump` | MDCT, KBD windows, LPC | 1.17e-07 relative / bit-exact / 0 |
-| `tools/gentables` | 31 codec tables | byte-identical |
-| `tools/cquant` | quantizer search, codebook trellis, band encoding | 128/128 band decisions, byte-identical bitstreams |
-| `tools/cpsy` | the 3GPP psychoacoustic model | window decisions identical, bit reservoir exact |
-| `tools/cnmr` | the NMR Viterbi trellis and rate control | bit-exact, tie-breaking included |
-| `tools/ctns`, `tools/ctwoloop` | TNS and the twoloop coder | bit-exact |
-| decoder gates | LC symbol decode, int32 IMDCT, full reconstruction, s16 PCM | 1,999,224 symbols + 12,969,984 reconstructed values byte-identical; s16 PCM identical to `ffmpeg -c:a aac_fixed` |
-
-PSNR cannot tell you that a psychoacoustic constant was misported, that a bit
-reservoir is drifting, or that a Viterbi path was suboptimal. These harnesses
-can, and they caught real bugs that would otherwise have shipped silently.
-
-The internal packages are deliberately written in a C-shaped style, so they
-stay diffable against upstream FFmpeg, and every ported function carries a
-provenance comment naming its C origin. That constraint is temporary: with the
-AAC-LC port complete and the differential gates green, the idiomatic-Go rewrite
-happens alongside the optimization work. The public API is idiomatic Go today.
+- **Encoder:** complete for AAC-LC, mono and stereo at 44.1 and 48 kHz, with
+  FFmpeg's three coders (NMR, the default, twoloop and fast) and all four coding
+  tools. Quality is on par with FFmpeg's `aac` encoder, and the default coder is
+  faster than it.
+- **Decoder:** AAC-LC, mono and stereo, 7.35 to 96 kHz, ADTS or raw access units.
+  HE-AAC is rejected with `ErrUnsupportedSBR` or `ErrUnsupportedPS`.
+- **Not supported:** HE-AAC (SBR/PS), xHE-AAC, LATM, ER/LD/ELD, more than two
+  channels, VBR and MP4 muxing (use [go-m4a](https://github.com/tphakala/go-m4a)).
 
 ## Install
 
@@ -151,291 +33,33 @@ happens alongside the optimization work. The public API is idiomatic Go today.
 go get github.com/tphakala/go-aac
 ```
 
-## Usage
-
-The library has two layers, mirroring [go-flac](https://github.com/tphakala/go-flac)
-(`flac` + `pcm`) and [go-opus](https://github.com/tphakala/go-opus)
-(`opus` + `oggopus`).
-
-### pcm: the streaming layer
-
-Interleaved little-endian integer PCM in, a self-framing ADTS stream out via
-`io.Writer`, or raw access units out through a callback for muxing. This is the
-right entry point for almost all callers.
+## Example
 
 ```go
 import aacpcm "github.com/tphakala/go-aac/pcm"
 
+// Encode interleaved 16-bit PCM to an ADTS stream.
 cfg := aacpcm.Config{SampleRate: 48000, BitDepth: 16, Channels: 1, Bitrate: 96000}
-
-// One shot (encoder drawn from a pool, safe for concurrent use):
 err := aacpcm.EncodeInterleaved(w, cfg, pcmBytes)
 
-// Or streaming, accepting any chunk size:
-e, err := aacpcm.NewEncoder(w, cfg)
-_, err = io.Copy(e, src)
-err = e.Close()
+// Decode an ADTS stream back to interleaved 16-bit PCM.
+d, err := aacpcm.NewDecoder(r)
+_, err = io.Copy(out, d)
 ```
 
-`Write` accepts arbitrary chunk sizes and buffers partial samples internally,
-so `io.Copy` works with any buffer, including sizes that do not divide the
-sample stride.
+## Documentation
 
-The package name deliberately collides with `go-flac/pcm`; import it with an
-alias (`aacpcm`), which is ordinary Go practice and lets a consumer switch
-between the two encoders with the same call shape.
-
-Muxing into MP4 or fragmented MP4 (CMAF) needs the opposite of ADTS: raw access
-units, boundaries reported out of band. `FrameEncoder` is that path, and it is
-the same pipeline, so the units are byte-identical to the ADTS stream's
-payloads.
-
-```go
-fe, err := aacpcm.NewFrameEncoder(cfg)
-asc := fe.AudioSpecificConfig() // esds DecoderSpecificInfo, valid before any audio
-_ = asc                         // goes in the init segment's esds box
-emit := func(au []byte, samples int) error {
-    segment = append(segment, au...) // au is borrowed; copy or append
-    return nil
-}
-err = fe.EncodeInterleaved(pcm, emit)
-err = fe.Flush(emit) // drains the priming frame; fe.Delay() gives the elst media_time
-```
-
-`Delay()` and the per-unit `samples` count are both PCM samples per channel, so
-a muxer whose track timescale is not the sample rate scales them into
-media-timescale ticks first.
-
-The emit callback has the same shape as go-flac's `pcm.FrameEncoder`, so a
-muxer's per-unit path is shared between the two codecs; the lifecycle differs,
-since AAC-LC needs a `Flush` to drain the priming frame where the FLAC frame
-encoder is one-shot.
-
-Decoding mirrors go-flac's `pcm.Decoder`: an AAC-LC stream in via `io.Reader`,
-interleaved little-endian S16 PCM out.
-
-```go
-d, err := aacpcm.NewDecoder(r) // ADTS by default, resynced past leading garbage
-if err != nil {                // errors.Is: aacpcm.ErrCorruptStream, aacpcm.ErrUnsupported, or the precise ErrUnsupportedSBR / ErrUnsupportedPS
-    return err
-}
-info := d.Info()       // SampleRate, Channels, Profile, valid immediately
-_, err = io.Copy(w, d) // WriteTo drains the whole decode; Read fills any buffer
-```
-
-The decoded PCM is byte-identical to `ffmpeg -c:a aac_fixed -f s16le` on every
-LC stream tested, including Apple afconvert output, from 8 kHz up to 96 kHz.
-The decoder never panics on malformed input (it returns wrapped
-`ErrCorruptStream` or `ErrUnsupported` sentinels, with `ErrUnsupportedSBR` /
-`ErrUnsupportedPS` naming HE-AAC and HE-AACv2 specifically so a caller can hand
-those off to an external decoder) and runs at zero allocations per frame in
-steady state. Raw access units plus an `AudioSpecificConfig` are opt in via
-`aacpcm.WithRawStream(asc)`. When the whole stream is in memory,
-`aacpcm.DecodeInterleaved(r)` returns all the PCM in one call, and
-`aacpcm.DecodeInterleavedLimit(r, maxBytes)` bounds the allocation for untrusted
-input (`aacpcm.ErrDecodeLimit` when the limit is hit).
-
-Live ingest (RTSP, HLS, HTTP or UDP) delivers access units one at a time, with
-loss and corruption, so there is a frame-level decoder that needs no reader in
-between: `aacpcm.NewADTSDecoder()` for self-describing ADTS frames, or
-`aacpcm.NewRawDecoder(asc)` for bare access units described by an
-AudioSpecificConfig that arrives out of band.
-
-```go
-fd, err := aacpcm.NewRawDecoder(asc) // or aacpcm.NewADTSDecoder()
-if err != nil {                      // ErrUnsupported, ErrUnsupportedSBR or ErrUnsupportedPS, from the ASC
-    return err
-}
-var pcm []byte
-for au := range units {
-    pcm, _, err = fd.DecodeFrame(pcm[:0], au) // samples per channel is always 1024
-    if err != nil {
-        continue // skip a corrupt unit; the next valid one still decodes correctly
-    }
-    play(pcm)
-}
-```
-
-`DecodeFrame` appends interleaved S16 PCM to a caller-owned buffer, decodes
-byte-identically to the reader `Decoder`, and allocates nothing in steady state.
-A failed unit leaves the decoder as it was before the call, so the next valid
-unit decodes exactly as if the bad one had never arrived (use `Reset` to start a
-clean session). A corrupt unit that still parses is decoded as audio and does
-advance the state, as the codec requires. An ADTS `au` must hold exactly one
-frame; the length field is not checked against the buffer. A `FrameDecoder` is
-not safe for concurrent use, but separate instances are independent.
-`aacpcm.ParseASC(asc)` reads an AudioSpecificConfig without building a decoder.
-
-### aac: the low-level codec
-
-Planar float32 frames in, raw AAC access units out, append-style and
-allocation-free in steady state.
-
-```go
-import "github.com/tphakala/go-aac"
-
-e, err := aac.NewEncoder(aac.EncoderConfig{SampleRate: 48000, Channels: 1, Bitrate: 128000})
-au, err := e.EncodeFrame(au[:0], [][]float32{frame}) // up to aac.FrameSize (1024) samples
-```
-
-Raw access units are not self-framing. Use `aac.AppendADTSHeader` to build a
-streamable ADTS stream, or `Encoder.AudioSpecificConfig` to mux them elsewhere.
-Most muxing callers want `pcm.FrameEncoder` instead, which does the conversion,
-framing and priming for them.
-
-## Gapless playback
-
-ADTS cannot signal encoder delay. Decoders emit roughly 1024 extra leading
-samples, and every AAC-in-ADTS stream behaves this way. Compute clip durations
-from the source PCM, not from the decoded AAC length.
-
-For gapless, sample-accurate output, mux into a container that carries an edit
-list, feeding the muxer from `pcm.FrameEncoder`.
-[go-m4a](https://github.com/tphakala/go-m4a) is the pure-Go MP4/M4A muxer
-and demuxer that pairs with go-aac for exactly this: it writes the encoder
-priming (`aac.EncoderDelay`, also `pcm.FrameEncoder.Delay`) into an `elst` edit list so
-playback is gapless, and reads `.m4a` files back into access units. Its
-`aacm4a` subpackage is a one-call bridge over go-aac, PCM to `.m4a` and back.
-No cgo and no external binaries.
-
-## Benchmarking
-
-`scripts/bench-encoders.sh` compares go-aac against FFmpeg's native AAC
-encoder, the C this library is ported from, on the same input (encode
-single-threaded, one process, file in and file out), reporting wall time, CPU
-seconds, peak RSS and stream size. `GOAAC_FFMPEG` must point at the pinned
-oracle build; a distro FFmpeg is refused, because 7.x and earlier ship a
-different coder set whose `anmr` is not the `nmr` trellis this library ports.
-PROVENANCE.md carries the required configure recipe, including the
-`-ffp-contract=off` that is part of the pin.
-
-```sh
-GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh          # generated reproducible input
-GOAAC_FFMPEG=/path/to/pinned/ffmpeg scripts/bench-encoders.sh my.wav   # your own WAV
-```
-
-Results for v0.7.2 on a 120 s 48 kHz mono recording at 128 kbps, over a real
-broadband recording that keeps the NMR search fully loaded; a sparse synthetic
-tone understates it. Each figure is the median of five runs on an otherwise
-idle machine, with both encoders pinned to one core. The ratio is CPU seconds,
-go-aac over FFmpeg; the FFmpeg CLI spawns helper threads, so CPU time compares
-more honestly than wall time.
-
-| Coder | Platform | go-aac | FFmpeg | go/C |
-| ----- | -------- | -----: | -----: | ---: |
-| NMR (default) | Raspberry Pi 5 (Cortex-A76) | 43x realtime | 35x | 0.83x |
-| NMR (default) | x86_64 (i5-7260U) | 58x | 47x | 0.81x |
-| twoloop | Raspberry Pi 5 (Cortex-A76) | 37x | 56x | 1.49x |
-| twoloop | x86_64 (i5-7260U) | 48x | 67x | 1.42x |
-| fast | Raspberry Pi 5 (Cortex-A76) | 112x | 135x | 1.22x |
-| fast | x86_64 (i5-7260U) | 129x | 152x | 1.16x |
-
-On the default NMR coder go-aac is **faster than the C**, using about 17% less
-CPU time on the Pi 5 (0.83x) and 19% less on the i5-7260U (0.81x), in **about a
-third of the memory or less** (about 4 MB peak RSS on both, against 12 MB for
-FFmpeg on the Pi and 18 MB on x86_64). The twoloop and fast coders stay behind,
-roughly 1.2x to 1.5x. Stream sizes track FFmpeg closely at the same bitrate,
-within about 0.001% for NMR and on the order of 0.01% for the other coders.
-These numbers moved a long way from the first baseline, where the NMR coder
-cost about twice the C's CPU time; the default SIMD kernels and the scalar-path
-work since then more than doubled its throughput.
-
-The gap that closed was compiler auto-vectorization, now hand-written. GCC emits
-631 packed floating-point arithmetic instructions in `aaccoder.o` from plain C,
-concentrated in the NMR quantizer search; Go's compiler emits none anywhere in
-the equivalent package. Disabling FFmpeg's hand-written assembly (`-cpuflags 0`)
-changes AAC encoding by only about 1%, so the gap was never the asm. The default
-SIMD kernels below reproduce that vectorization for the NMR trellis, the
-quantizer and the band cost, which is what took the default coder past the C;
-twoloop and fast are not targeted as heavily and keep more of the gap. The
-scalar port remains the canonical reference.
-
-Steady-state encoding is allocation-free (0 allocs/frame) for every coder, mono
-and stereo. Decoding is far cheaper: `pcm.Decoder` turns a 128 kbps 48 kHz
-stream into 16-bit PCM at about 540x real time for mono and 310x for stereo on
-the Pi 5, and 780x and 450x on the i5-7260U (one core, best of 30 passes over
-120 s of audio). It is likewise allocation-free per frame in steady state.
-
-### Profiling
-
-Profile on Linux. On darwin/arm64, pprof fabricates hot spots: it has parked 10%
-to 16% of encode on cheap bulk-memory leaves
-(`encoding/binary.littleEndian.Uint16`, `runtime.memmove`) that direct
-measurement puts at 0.2% and 0.04%, wrong by 47x and 260x, and the phantom moves
-between runs while landing on whatever streaming leaf is nearby. The same
-benchmarks on linux/amd64 and linux/arm64 are clean, and
-cumulative shares for large subsystems stay trustworthy on macOS; it is leaf
-attribution that is not. If you must profile on a Mac, reconcile every leaf
-number against call counts before acting on it: count the calls, microbenchmark
-the leaf at the shapes the real encode drives, multiply, and compare against
-encode wall time. A disagreement above about 2x means the profile is wrong, not
-the arithmetic. Run benchmark cases isolated and min-of-N when a number will feed
-a decision; a back-to-back batch produced a spurious 1.9x on one case here.
-
-### SIMD kernels (default, opt out with `-tags noasm`)
-
-By default the encoder's hottest kernels are SIMD implementations built on
-[github.com/tphakala/simd](https://github.com/tphakala/simd): the NMR Viterbi
-trellis search and its node cost, the AbsPow34 magnitude transform
-(`|x|^(3/4)`), the QuantizeBands quantizer, and the LAME high-pass filter of the
-psychoacoustic model. The `simd` library picks the widest path the CPU
-supports at runtime and falls back to pure Go on any CPU without it. All use NEON
-on arm64. On x86_64 the trellis step needs AVX2 and falls back to portable Go without
-it, while the node cost, the high-pass filter, AbsPow34 and QuantizeBands use AVX
-(AbsPow34 with an SSE path below that). The cost-only band cost evaluated by every rate-distortion estimate is
-Go assembly in this module: AVX2 on x86_64 and NEON on arm64, with the scalar
-loop on any other CPU and under `SIMD_DISABLE`. Every backend is bit-identical,
-so the default build produces byte-identical output to the scalar path and
-passes the same differential oracle gate, not a relaxed PSNR tier.
-
-Building with `-tags noasm` selects the pure-Go scalar kernels instead: no
-assembly in the binary and the `simd` dependency linked out entirely, for a
-smaller and more easily audited build. The scalar kernels stay canonical and are
-the reference the SIMD ones are gated against.
-
-Measured full-encode speedups of the SIMD default over the `-tags noasm` scalar
-build for v0.7.2: `BenchmarkEncodeFrames` over a 120 s 48 kHz mono recording at
-128 kbps, one pinned core, `GOMAXPROCS=1`, 10 interleaved rounds per build,
-`benchstat` medians (every row p < 0.01). Every percentage here is a reduction
-in encode time, so 30% faster means the SIMD default spends 30% less time, not
-that it does 30% more work per second:
-
-| Coder | Raspberry Pi 5 (Cortex-A76, NEON) | x86_64 i5-7260U (AVX2) |
-| ----- | --------------------------------: | ---------------------: |
-| NMR (default) | 33% faster (4.18 s to 2.82 s) | 45% faster (3.82 s to 2.08 s) |
-| twoloop | 17% faster (3.83 s to 3.20 s) | 18% faster (3.05 s to 2.49 s) |
-| fast | 30% faster (1.51 s to 1.06 s) | 31% faster (1.33 s to 0.92 s) |
-
-The seconds are one `BenchmarkEncodeFrames` pass over the recording. They time
-the codec alone in a warm loop, so they do not correspond to the realtime
-multiples in the `bench-encoders.sh` table above, which are whole-process wall
-clock. Every SIMD kernel listed above is byte-identical to the scalar port, so
-the choice is a pure speed knob with no effect on output.
-
-The two builds differ only in speed, and because `-tags noasm` silently drops to
-the scalar path a downstream release can end up there unnoticed.
-`aac.SIMDEnabled()` reports which kernel set was compiled in, so a build or
-startup check can assert it:
-
-```go
-if !aac.SIMDEnabled() {
-    log.Println("go-aac: scalar kernels (built with -tags noasm); the default build has the SIMD ones")
-}
-```
-
-The answer describes what was compiled in, not what the CPU running the binary
-supports.
-
-## Sponsor
-
-go-aac is maintained in my own time. If it is useful to you or your project, you
-can support continued maintenance through GitHub Sponsors; sponsorship is
-entirely optional and never gates any feature.
-
-[![Sponsor on GitHub](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor%20%40tphakala)](https://github.com/sponsors/tphakala)
+- [Usage](doc/usage.md): streaming and frame-level encoding and decoding, muxing
+  raw access units, gapless playback, the low-level `aac` package.
+- [Quality and validation](doc/quality.md): quality measurements and how the port
+  is checked against the C reference.
+- [Performance](doc/performance.md): benchmarks against FFmpeg, the SIMD kernels
+  and `-tags noasm`, profiling notes.
+- [API reference](https://pkg.go.dev/github.com/tphakala/go-aac) on pkg.go.dev.
 
 ## License
 
 LGPL-2.1-or-later. go-aac is a derivative work of FFmpeg's LGPL-licensed AAC
 encoder and cannot be relicensed permissively. See [LICENSE](LICENSE) and
-[PROVENANCE.md](PROVENANCE.md).
+[PROVENANCE.md](PROVENANCE.md). If go-aac is useful to you, you can support its
+maintenance through [GitHub Sponsors](https://github.com/sponsors/tphakala).

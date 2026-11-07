@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Orientation for coding agents and automated reviewers working on this repository. README.md is the user-facing reference (usage, status, quality and benchmark figures). PROVENANCE.md records the upstream pin and the oracle build recipe. This file is the map for changing and reviewing the code.
+Orientation for coding agents and automated reviewers working on this repository. README.md is the short user-facing landing page; `doc/` holds the user documentation (usage in `doc/usage.md`, quality and validation in `doc/quality.md`, benchmark figures and the SIMD kernels in `doc/performance.md`). PROVENANCE.md records the upstream pin and the oracle build recipe. This file is the map for changing and reviewing the code.
 
 ## What this is
 
@@ -117,7 +117,7 @@ Run `task check` before pushing. CI additionally runs the test matrix (Linux, ma
 - **No `//nolint` without a linter name and a reason.** If a linter is wrong often enough to silence globally, change `.golangci.yaml` with a comment saying why.
 - **Errors.** Strings carry the `go-aac:` prefix (`go-aac/pcm:` in `pcm`). Wrap with `%w`.
 - **Comments.** Explain why: the C origin and line at the pin, the failure being avoided, the measurement behind a constant. Match the existing density.
-- **Docs follow code.** A behaviour change updates the package doc, the README and the sentinel's comment in the same change. README claims about quality and speed are measured figures; do not edit them without a measurement.
+- **Docs follow code.** A behaviour change updates the package doc, the README or `doc/` page that describes it, and the sentinel's comment in the same change. Claims about quality and speed (README, `doc/quality.md`, `doc/performance.md`) are measured figures; do not edit them without a measurement. Keep the README short; detail goes in `doc/`.
 - **Commits** use an imperative subject with a type prefix (`feat:`, `fix:`, `docs:`, `build:`, `ci:`, `deps:`, `perf:`, `test:`, `refactor:`), optionally scoped (`fix(dec): ...`), with `!` for a breaking change.
 - **Git hooks.** `.githooks/pre-commit` runs gofmt on staged Go files, then `golangci-lint run --fix` and a final `golangci-lint run` over the module (skipped when no Go file is staged); `pre-push` guards the commit identity (only the GitHub noreply address is allowed) and runs build and vet. Do not bypass either.
 - **Dependencies.** Dependabot keeps Go modules and GitHub Actions current. Runtime dependencies are limited to `tphakala/simd`; do not add another. Generic SIMD primitives go to `simd`, not here (design rule 5).
