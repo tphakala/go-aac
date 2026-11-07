@@ -4,6 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tphakala/go-aac.svg)](https://pkg.go.dev/github.com/tphakala/go-aac)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tphakala/go-aac/badge)](https://scorecard.dev/viewer/?uri=github.com/tphakala/go-aac)
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/License-LGPL--2.1--or--later-blue.svg)](LICENSE)
+[![Sponsor](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor)](https://github.com/sponsors/tphakala)
 
 Pure-Go AAC-LC encoder and decoder, ported from FFmpeg's native AAC encoder and
 fixed-point decoder. No cgo and no external libraries. Each subsystem is
@@ -57,9 +58,16 @@ _, err = io.Copy(out, d)
   and `-tags noasm`, profiling notes.
 - [API reference](https://pkg.go.dev/github.com/tphakala/go-aac) on pkg.go.dev.
 
+## Sponsor
+
+go-aac is maintained in my own time. If it is useful to you or your project, you
+can support continued maintenance through GitHub Sponsors; sponsorship is
+entirely optional and never gates any feature.
+
+[![Sponsor on GitHub](https://img.shields.io/github/sponsors/tphakala?logo=githubsponsors&color=ea4aaa&label=Sponsor%20%40tphakala)](https://github.com/sponsors/tphakala)
+
 ## License
 
 LGPL-2.1-or-later. go-aac is a derivative work of FFmpeg's LGPL-licensed AAC
 encoder and cannot be relicensed permissively. See [LICENSE](LICENSE) and
-[PROVENANCE.md](PROVENANCE.md). If go-aac is useful to you, you can support its
-maintenance through [GitHub Sponsors](https://github.com/sponsors/tphakala).
+[PROVENANCE.md](PROVENANCE.md).
